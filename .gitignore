@@ -1,0 +1,7 @@
+*.csv
+*.jsonl
+*.json
+.gemini/
+.agents/
+__pycache__/
+*.pyc
