@@ -10,11 +10,67 @@ import json
 import os
 import sys
 import time
-import requests
 import base64
 import urllib.parse
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
+
+# ⚡ 使用 curl_cffi 替代 requests，伪装 Chrome TLS 指纹绕过 WAF JA3 检测
+from curl_cffi import requests
+# 全局 TLS 指纹伪装版本
+TLS_IMPERSONATE = "chrome120"
+
+
+def _cookie_attr(cookie_jar, cookie_or_name, attr):
+    """
+    兼容 curl_cffi（cookie 是 str）和 requests（cookie 是对象）。
+    attr: 'domain' | 'name' | 'value'
+    """
+    if isinstance(cookie_or_name, str):
+        # curl_cffi: cookie 是字符串 name，从 jar 中取值
+        if attr == "name":
+            return cookie_or_name
+        if attr == "value":
+            return cookie_jar.get(cookie_or_name, "")
+        if attr == "domain":
+            return "?"
+    else:
+        # requests: cookie 是对象
+        return getattr(cookie_or_name, attr, "?")
+
+
+def _cookie_dump(cookie_jar):
+    """打印 cookie jar 中的所有 cookie（兼容两种库）"""
+    for c in cookie_jar:
+        name = _cookie_attr(cookie_jar, c, "name")
+        value = _cookie_attr(cookie_jar, c, "value")
+        domain = _cookie_attr(cookie_jar, c, "domain")
+        if len(str(value)) > 40:
+            value = str(value)[:40] + "..."
+        print(f"  Domain={domain} | {name}={value}")
+
+
+def _chrome_session():
+    """
+    创建一个自动附带 Chrome TLS 指纹伪装的 Session。
+    所有 .get() / .post() 自动注入 impersonate=TLS_IMPERSONATE。
+    """
+    sess = requests.Session()
+
+    _orig_get = sess.get
+    _orig_post = sess.post
+
+    def _get(url, **kwargs):
+        kwargs.setdefault("impersonate", TLS_IMPERSONATE)
+        return _orig_get(url, **kwargs)
+
+    def _post(url, **kwargs):
+        kwargs.setdefault("impersonate", TLS_IMPERSONATE)
+        return _orig_post(url, **kwargs)
+
+    sess.get = _get
+    sess.post = _post
+    return sess
 
 # ==============================================================================
 # 配置区域
@@ -86,16 +142,37 @@ def init_oauth(session):
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
         "referer": "https://wenshu.court.gov.cn/"
     }
-    # ⚠️ 必须用 allow_redirects=False：account 对未登录用户可能跳转回 oauth/authorize → wenshu
-    # 如果跟随跳转，wenshu 会重新种一个新的匿名 SESSION，覆盖掉 tongyiLogin 产生的原始 SESSION
-    # 后续 authorizeCallBack 会绑定到错误的 SESSION 导致 anonymousUser
+    # ⚠️ 关键：account 页面可能通过 302 跳转回 wenshu，这会覆盖 tongyiLogin 产生的 SESSION
+    # 策略：先 allow_redirects=False 拿到 HOLDONKEY + ncCookie（从 Set-Cookie 头），
+    # 同时打印响应状态码判断是否发生了跳转；如果跳转了，SESSION 可能已被覆盖
     login_resp = session.get(app_url, headers=login_page_headers, proxies=PROXIES,
                              allow_redirects=False, timeout=15)
+    print(f"  [Debug] account 页面 HTTP {login_resp.status_code}")
+    if "Location" in login_resp.headers:
+        print(f"  [Debug] ⚠️ 服务端返回了 302 跳转: {login_resp.headers['Location'][:100]}...")
+
     holdonkey = session.cookies.get('HOLDONKEY', domain='account.court.gov.cn')
+    nccookie = session.cookies.get('ncCookie', domain='account.court.gov.cn')
     if holdonkey:
         print(f"✅ account 登录上下文已初始化！HOLDONKEY: {holdonkey[:16]}...")
     else:
         print("⚠️ 未获取到 HOLDONKEY，account 登录上下文初始化可能失败")
+    if nccookie:
+        print(f"✅ 获取到反爬安全 cookie ncCookie: {nccookie[:20]}...")
+    else:
+        print("⚠️ 未获取到 ncCookie（反爬安全 cookie），后续请求可能被 WAF 拦截")
+        print("   尝试通过访问 account 首页来触发 ncCookie 下发...")
+        # 追加一次 account 首页访问，可能触发安全 cookie 下发
+        r_nc = session.get("https://account.court.gov.cn/app", headers={
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "referer": "https://wenshu.court.gov.cn/"
+        }, proxies=PROXIES, allow_redirects=False, timeout=10)
+        nccookie = session.cookies.get('ncCookie', domain='account.court.gov.cn')
+        if nccookie:
+            print(f"  ✅ 二次请求后获取到 ncCookie: {nccookie[:20]}...")
+        else:
+            print("  ⚠️ 仍未获取到 ncCookie，后续 /api/login 可能被拦截")
     
     return oauth_url, app_url
 
@@ -153,7 +230,7 @@ def login_with_password(session, oauth_url, app_url):
             }
             validate_body = {
                 "appkey": "akan",
-                "answer": answer.upper(),
+                "answer": answer,
                 "token": token,
                 "sessionId": session_id,
                 "appDomain": "wenshu.court.gov.cn"
@@ -214,58 +291,112 @@ def login_with_password(session, oauth_url, app_url):
         for k, v in resp.headers.items():
             print(f"  {k}: {v}")
         print("🍪 登录成功后的 Cookies:")
-        for c in session.cookies:
-            print(f"  Domain={c.domain} | {c.name}={c.value}")
+        _cookie_dump(session.cookies)
     else:
         print(f"❌ 登录失败: {res_json.get('message')}")
         print(f"调试信息: {res_json}")
         sys.exit(1)
         
-    print("\n🚀 [4/4] 正在用已认证 HOLDONKEY 访问 OAuth 链接，手动跟踪跳转获取 wenshu Session...")
+    # =========================================================================
+    # 🔑 关键步骤：login 成功后，HOLDONKEY 已变为已认证态。
+    # 但原 oauth_url 的 state/signature 是在旧（未认证）HOLDONKEY 上下文生成的，
+    # 直接使用可能导致 OAuth 服务器颁发无效 code。
+    # 解决方案：重新调用 tongyiLogin/authorize 获取新鲜 OAuth URL（state/signature 匹配当前会话）
+    # =========================================================================
+    print("\n🔄 [关键] 登录成功，正在用已认证会话重新获取 OAuth 授权 URL...")
+    import re
+    old_state = re.search(r'state=([^&]+)', oauth_url)
+    old_state = old_state.group(1)[:16] if old_state else '?'
+    print(f"  旧 OAuth URL state: {old_state}...")
+
+    try:
+        refresh_headers = {
+            "accept": "*/*",
+            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "sec-ch-ua": "\"Google Chrome\";v=\"149\", \"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "x-requested-with": "XMLHttpRequest",
+            "referer": "https://wenshu.court.gov.cn/website/wenshu/181010CARHS5BS3C/index.html?open=login"
+        }
+        refresh_resp = session.post(
+            "https://wenshu.court.gov.cn/tongyiLogin/authorize",
+            headers=refresh_headers, proxies=PROXIES, timeout=10
+        )
+        fresh_oauth_url = refresh_resp.text.strip()
+        if fresh_oauth_url.startswith("http"):
+            new_state = re.search(r'state=([^&]+)', fresh_oauth_url)
+            new_state = new_state.group(1)[:16] if new_state else '?'
+            print(f"  新 OAuth URL state: {new_state}...")
+            print(f"  ✅ 已获取新鲜 OAuth URL，将使用新 URL 进行回调")
+            oauth_url = fresh_oauth_url  # ← 替换为新鲜 URL
+            # 同时更新 app_referer
+            app_url = f"https://account.court.gov.cn/app?back_url={urllib.parse.quote(oauth_url, safe='')}"
+        else:
+            print(f"  ⚠️ 获取新 OAuth URL 失败({fresh_oauth_url[:80]})，回退使用旧 URL")
+    except Exception as e:
+        print(f"  ⚠️ 获取新 OAuth URL 异常({e})，回退使用旧 URL")
+
+    print("\n🚀 [4/4] 正在用已认证 HOLDONKEY 访问 OAuth 链接，自动跟踪跳转获取 wenshu Session...")
     app_referer = f"https://account.court.gov.cn/app?back_url={urllib.parse.quote(oauth_url, safe='')}"
-    
-    # Step 4a: 访问 oauth/authorize，获取 303 跳转到 wenshu CallBack（不自动跟随）
-    r_oauth = session.get(oauth_url, headers={
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+
+    # 与支付宝扫码流程保持一致：用 allow_redirects=True 完整跟踪跳转链
+    # 服务端看到已认证的 HOLDONKEY → 颁发 code → 302 到 CallBackController → 设置 SESSION → 302 到首页
+    exchange_headers = {
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
         "upgrade-insecure-requests": "1",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
         "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
         "referer": app_referer
-    }, proxies=PROXIES, allow_redirects=False, timeout=15)
-    print(f"  [4a] oauth_url → HTTP {r_oauth.status_code}")
-    
-    callback_url = r_oauth.headers.get("Location")
-    if not callback_url:
-        print(f"❌ 未获取到回调 Location，响应头: {dict(r_oauth.headers)}")
-        sys.exit(1)
-    print(f"  [4a] callback_url: {callback_url[:90]}...")
-    
-    # Step 4b: 访问 CallBackController（wenshu 侧），触发服务端 Session 绑定
-    import re
-    r_cb = session.get(callback_url, headers={
-        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "upgrade-insecure-requests": "1",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-        "referer": oauth_url
-    }, proxies=PROXIES, allow_redirects=False, timeout=15)
-    print(f"  [4b] authorizeCallBack → HTTP {r_cb.status_code}")
-    print(f"       Set-Cookie: {r_cb.headers.get('Set-Cookie', '无')}")
-    print(f"       Content: {r_cb.text[:200]}")
-    
-    # Step 4c: 访问 window.open 的落地页
-    landing_match = re.search(r"window\.open\s*\(\s*['\"]([^'\"]+)['\"]", r_cb.text)
-    loc_match = re.search(r"(?:location\.href|window\.location)\s*=\s*['\"]([^'\"]+)['\"]", r_cb.text)
-    landing_url = "https://wenshu.court.gov.cn/"
+    }
+    holdonkey_val = session.cookies.get('HOLDONKEY', domain='account.court.gov.cn')
+    print(f"  当前 HOLDONKEY: {holdonkey_val[:16] if holdonkey_val else '(空)'}...")
+    print(f"  OAuth URL 前80字符: {oauth_url[:80]}...")
+
+    cb_resp = session.get(oauth_url, headers=exchange_headers, proxies=PROXIES,
+                          allow_redirects=True, timeout=15)
+
+    print(f"🏁 授权跳转最终落地页: {cb_resp.url}")
+    print(f"📋 跳转历史({len(cb_resp.history)}步):")
+    for i, r in enumerate(cb_resp.history):
+        set_cookie = r.headers.get('Set-Cookie', '(无 Set-Cookie)')
+        print(f"  [{i+1}] HTTP {r.status_code} → {r.url[:80]}")
+        print(f"       Set-Cookie: {set_cookie[:120]}")
+    print(f"  [最终] HTTP {cb_resp.status_code} → {cb_resp.url[:80]}")
+    print(f"         Set-Cookie: {cb_resp.headers.get('Set-Cookie', '(无 Set-Cookie)')}")
+
+    print(f"\n📄 === CallBack 响应完整文本 (前800字) ===")
+    print(cb_resp.text[:800])
+    print("=== 响应文本结束 ===\n")
+
+    # 提取落地页 URL
+    landing_match = re.search(r"window\.open\s*\(\s*['\"]([^'\"]+)['\"]", cb_resp.text)
+    loc_match = re.search(r"(?:location\.href|window\.location)\s*=\s*['\"]([^'\"]+)['\"]", cb_resp.text)
+    landing_url = cb_resp.url  # 默认使用最终落地页
     if landing_match or loc_match:
         m = landing_match or loc_match
         landing_path = m.group(1)
         landing_url = "https://wenshu.court.gov.cn" + landing_path if landing_path.startswith("/") else landing_path
-        print(f"  [4c] 访问落地页: {landing_url}")
-        session.get(landing_url, headers={
-            "accept": "text/html,*/*", "upgrade-insecure-requests": "1",
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "referer": callback_url
-        }, proxies=PROXIES, timeout=15)
+        print(f"\n🚀 [关键步骤] 正在访问 OAuth 最终落地页以激活服务端会话权限: {landing_url}")
+        landing_headers = {
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "upgrade-insecure-requests": "1",
+            "referer": cb_resp.url,
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+        }
+        landing_resp = session.get(landing_url, headers=landing_headers, proxies=PROXIES, timeout=15)
+        print(f"✅ 落地页激活响应状态: HTTP {landing_resp.status_code}")
+        print(f"   Set-Cookie: {landing_resp.headers.get('Set-Cookie', '(无)')}")
+    else:
+        print("⚠️ 未找到 window.open/location.href 跳转目标，以 final_url 作为 landing_url")
     
+    print(f"\n🍪 访问落地页后 session 中所有 Cookie:")
+    _cookie_dump(session.cookies)
+
     print(f"\n🔍 立即验证登录态（当前内存 session）...")
     chk_headers = {
         "accept": "application/json, text/javascript, */*; q=0.01",
@@ -292,6 +423,9 @@ def login_with_password(session, oauth_url, app_url):
         
         if not user_name or "anonymous" in str(user_name).lower():
             print("  ❌ 警告: Session 未绑定用户，登录验证失败！")
+            print("  💡 可能原因: (1) ncCookie 缺失导致登录被 WAF 拦截")
+            print("             (2) SESSION 被覆盖（tongyiLogin 和 account 跳转冲突）")
+            print("             (3) HOLDONKEY 与 OAuth state 不匹配")
         else:
             print(f"  🎉 登录验证通过! userName = {user_name}")
     except Exception as e:
@@ -299,18 +433,21 @@ def login_with_password(session, oauth_url, app_url):
         print(f"  [Debug] Raw response: {chk_resp.text}")
     
 
-    # 保存 Cookie
+    # 保存 Cookie（兼容 curl_cffi 和 requests）
     final_cookies = {}
-    for cookie in session.cookies:
-        if "wenshu" in cookie.domain or cookie.domain == ".court.gov.cn":
-            final_cookies[cookie.name] = cookie.value
+    for c in session.cookies:
+        domain = _cookie_attr(session.cookies, c, "domain")
+        name = _cookie_attr(session.cookies, c, "name")
+        value = _cookie_attr(session.cookies, c, "value")
+        if "wenshu" in str(domain) or domain == ".court.gov.cn":
+            final_cookies[name] = value
     
     session_data = {
         "username": USERNAME,
         "cookies": final_cookies,
         "timestamp": int(time.time()),
         "oauth_url": oauth_url,
-        "final_url": callback_url,
+        "final_url": cb_resp.url,
         "landing_url": landing_url
     }
     
@@ -393,6 +530,6 @@ if __name__ == "__main__":
     print("  中国裁判文书网 - 纯协议账号密码全自动登录工具")
     print("═" * 54)
     
-    with requests.Session() as s:
+    with _chrome_session() as s:
         oauth_url, app_url = init_oauth(s)
         login_with_password(s, oauth_url, app_url)
