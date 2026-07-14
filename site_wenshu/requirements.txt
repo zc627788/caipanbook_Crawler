@@ -1,0 +1,7 @@
+curl_cffi==0.15.0
+playwright==1.60.0
+ddddocr==1.6.1
+pycryptodome==3.23.0
+numpy
+opencv-python
+Pillow

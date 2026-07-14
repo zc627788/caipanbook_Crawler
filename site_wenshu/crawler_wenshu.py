@@ -5,7 +5,7 @@
 - 输出：JSONL 格式（含规范化字段名）
 """
 
-import tls_client                # ⚡ tls_client 伪装 Chrome TLS 指纹（比 curl_cffi 更准）
+from curl_cffi import requests as cr         # ⚡ curl_cffi 完美伪装 Chrome 120 C 层 TLS 与 HTTP/2 指纹
 import json
 import time
 import sys
@@ -19,29 +19,25 @@ BASE_DIR   = Path(__file__).parent
 CRYPTO_DIR = BASE_DIR / "utils"
 sys.path.insert(0, str(BASE_DIR))
 from utils.wenshu_crypto import generate_random_salt, encrypt_ciphertext, decrypt_result
+from utils.account_pool import AccountPoolManager
+import re
 
-# ── 从 session.json 读取登录凭据（由 login_sniffer.py 生成）───────────────
+# ── 从 session.json 读取页码标识或默认配置 ─────────────────────────────────────
 SESSION_FILE = BASE_DIR / "config" / "session.json"
 _session_data = {}
 if SESSION_FILE.exists():
     with open(SESSION_FILE, "r", encoding="utf-8") as f:
         _session_data = json.load(f)
 
-SESSION_COOKIE   = _session_data.get("session", "")
-HOLDONKEY_COOKIE = _session_data.get("holdonkey", "")
+PAGE_ID = _session_data.get("page_id") or _session_data.get("pageId") or _session_data.get("PAGE_ID", "")
 
-if not SESSION_COOKIE:
-    print("❌ 未找到 session.json，请先运行 login_auto.py 登录！")
-    sys.exit(1)
-
-print(f"📋 已加载: SESSION={SESSION_COOKIE[:16]}... HOLDONKEY={HOLDONKEY_COOKIE[:16] if HOLDONKEY_COOKIE else '无'}...")
 CPRQ_START = "2015-06-01"
 CPRQ_END   = "2015-06-30"
 PAGE_SIZE  = 5  # ⚠️ 不要改！改了日期过滤会失效
 LIMIT_MAX  = 600
 
 # ── 输出文件 ──────────────────────────────────────────────────────────────
-OUTPUT_FILE     = BASE_DIR / "wenshu_2025july.jsonl"
+OUTPUT_FILE     = BASE_DIR / "wenshu_2015mon.jsonl"
 CHECKPOINT_FILE = BASE_DIR / "crawler_checkpoint.json"
 
 # ── 网络配置 ──────────────────────────────────────────────────────────────
@@ -50,55 +46,90 @@ DELAY_MIN = 3.0   # 基础翻页速度（像人一样快速浏览）
 DELAY_MAX = 6.0   
 MAX_ERRORS = 5    
 
-# ── 字段映射 ──────────────────────────────────────────────────────────────
-FIELD_MAP = {
-    "1":      "title",       "2":      "court",       "7":      "case_no",
-    "9":      "type_code",   "10":     "proc_code",   "26":     "content",
-    "31":     "date",        "32":     "extra",       "43":     "source",
-    "44":     "flag",        "rowkey": "doc_id",
+# ── 分类码与字段映射 ──────────────────────────────────────────────────────
+CASE_TYPE_MAP = {
+    "1": "刑事案件", "2": "民事案件", "3": "行政案件",
+    "4": "赔偿案件", "5": "执行案件", "民事案件": "民事案件",
+    "刑事案件": "刑事案件", "行政案件": "行政案件"
 }
 
-
-def normalize_doc(raw: dict) -> dict:
-    return {FIELD_MAP.get(k, k): v for k, v in raw.items()}
-
-
-def make_session():
-    sess = tls_client.Session(client_identifier="chrome_120", random_tls_extension_order=True)
-    sess.proxies = PROXIES
-
-    # 直接设置所有 cookie
-    cookie_map = [
-        ("SESSION",   SESSION_COOKIE,                     "wenshu.court.gov.cn"),
-        ("HOLDONKEY", HOLDONKEY_COOKIE,                   "account.court.gov.cn"),
-        ("ncCookie",  _session_data.get("nccookie", ""),  "account.court.gov.cn"),
-        ("wzws_reurl",_session_data.get("wzws_reurl", ""),"wenshu.court.gov.cn"),
-        ("_bl_uid",   _session_data.get("bl_uid", ""),    "account.court.gov.cn"),
-    ]
-    for name, value, domain in cookie_map:
-        if value:
-            sess.cookies.set(name, value, domain=domain)
-    return sess
+def normalize_doc(raw: dict, target_count: int = 0) -> dict:
+    title = str(raw.get("1", "") or raw.get("title", "") or raw.get("case_name", ""))
+    court = str(raw.get("2", "") or raw.get("court", "") or raw.get("court_name", ""))
+    case_no = str(raw.get("7", "") or raw.get("case_no", "") or raw.get("case_code_ori", ""))
+    
+    raw_type = str(raw.get("9", "") or raw.get("type_code", "") or raw.get("case_type", ""))
+    case_type = CASE_TYPE_MAP.get(raw_type, raw_type if raw_type else "民事案件")
+    
+    program = str(raw.get("10", "") or raw.get("proc_code", "") or raw.get("program", "一审"))
+    if program == "一审" and case_type == "民事案件":
+        program = "民事一审"
+    elif program == "一审" and case_type == "刑事案件":
+        program = "刑事一审"
+        
+    judge_date = str(raw.get("31", "") or raw.get("date", "") or raw.get("judge_date", ""))
+    content = str(raw.get("26", "") or raw.get("content", ""))
+    publish_date = str(raw.get("32", "") or raw.get("publish_date", judge_date))
+    
+    reason = str(raw.get("reason", ""))
+    if not reason:
+        m_reason = re.search(r'与[^，。；\n]+?关于?([^，。；\n]{2,20}?)(?:纠纷|一案|一审|二审|民事|刑事|行政|判决书|裁定书)', title)
+        if m_reason:
+            reason = m_reason.group(1).strip()
+        else:
+            m_reason2 = re.search(r'([^，。；\n]{2,18}?)(?:纠纷|罪|一案|一审|二审|民事|判决|裁定)', title)
+            if m_reason2:
+                reason = m_reason2.group(1).strip()
+                
+    litigant = str(raw.get("litigant", ""))
+    if not litigant:
+        parties = re.findall(r'((?:原告|被告|上诉人|被上诉人|申请人|被申请人|公诉机关|被告人)[^，。；\n]{2,25})', content)
+        if parties:
+            litigant = ",".join(parties[:4])
+        elif "与" in title:
+            litigant = title.split("一审")[0].split("二审")[0].replace("原告", "").replace("被告", "")
+            
+    return {
+        "case_name": title,
+        "court_name": court,
+        "reason": reason,
+        "program": program,
+        "case_code_ori": case_no,
+        "case_type": case_type,
+        "publish_date": publish_date,
+        "judge_date": judge_date,
+        "litigant": litigant,
+        "content": content,
+        "doc_id": str(raw.get("rowkey", "") or raw.get("doc_id", "")),
+        "target_count": target_count,
+        "is_aligned": True
+    }
 
 
 def get_base_headers(target_date: str) -> dict:
+    referer = "https://wenshu.court.gov.cn/website/wenshu/181217BMTKHNT2W0/index.html"
+    if PAGE_ID:
+        referer += f"?pageId={PAGE_ID}"
+        if target_date:
+            referer += f"&cprqStart={target_date}&cprqEnd={target_date}"
+
     return {
         "accept":           "application/json, text/javascript, */*; q=0.01",
         "accept-language":  "zh-CN,zh;q=0.9,en;q=0.8",
         "content-type":     "application/x-www-form-urlencoded; charset=UTF-8",
-        "sec-ch-ua":        '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+        "sec-ch-ua":        '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
         "sec-fetch-dest":   "empty",
         "sec-fetch-mode":   "cors",
         "sec-fetch-site":   "same-origin",
         "x-requested-with": "XMLHttpRequest",
-        "referer": "https://wenshu.court.gov.cn/website/wenshu/181217BMTKHNT2W0/index.html",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+        "referer":          referer,
+        "user-agent":       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
 
 
-def call_q4w(sess, target_date: str, body_str: str, need_cipher: bool = True) -> dict | None:
+def call_q4w(pool_mgr, target_date: str, body_str: str, need_cipher: bool = True) -> dict | None:
     now = datetime.now()
     date_str = now.strftime("%Y%m%d")
     cipher = encrypt_ciphertext(int(time.time() * 1000), generate_random_salt(24), date_str)
@@ -109,32 +140,45 @@ def call_q4w(sess, target_date: str, body_str: str, need_cipher: bool = True) ->
         body += f"&ciphertext={urllib.parse.quote(cipher)}"
 
     try:
+        if hasattr(pool_mgr, "get_active_session"):
+            sess, acc = pool_mgr.get_active_session()
+            if not sess:
+                print("  🚨 [号池调度] 当前所有账号处于冷却或无有效会话，休眠 30 秒等待解冻...")
+                time.sleep(30)
+                sess, acc = pool_mgr.get_active_session()
+                if not sess:
+                    return {"__code9__": True, "desc": "无可用会话"}
+            username = acc.get("username", "未知")
+        else:
+            sess = pool_mgr
+            username = "默认单号"
+
         resp = sess.post(
             "https://wenshu.court.gov.cn/website/parse/rest.q4w",
             headers=get_base_headers(target_date), data=body
         )
         j = resp.json()
-        # debug: 打印首次失败的请求
-        if j.get("code") != 1 and not hasattr(call_q4w, "_debugged"):
-            call_q4w._debugged = True
-            print(f"  [DEBUG] body: {body[:300]}")
-            cks = {}
-            for c in sess.cookies: cks[str(c)] = True
-            print(f"  [DEBUG] cookies: SESSION={'SESSION' in cks} wzws={'wzws_reurl' in cks} "
-                  f"HOLDONKEY={'HOLDONKEY' in cks} ncCookie={'ncCookie' in cks} _bl_uid={'_bl_uid' in cks}")
-            print(f"  [DEBUG] response: {resp.text[:300]}")
         code = j.get("code")
         if code == 1:
-            # result 可能是加密字符串，也可能是原生的字典
+            if hasattr(pool_mgr, "report_request"):
+                should_switch = pool_mgr.report_request(username, count=1)
+                if should_switch:
+                    print(f"  ♻️ [限额轮转] 账号 {username} 本轮连续发包已达 200 次安全上限，放回池中休眠 30 分钟。下轮将自动切用新号接棒！")
             if isinstance(j["result"], str):
                 dec = decrypt_result(j["result"], j["secretKey"], date_str)
                 return json.loads(dec)
             else:
                 return j["result"]
         elif code in (9, -9):
-            return {"__code9__": True, "desc": j.get("description", "")}
+            print(f"  ⚠ API返回 code={code} (无权限/Cookie失效): {j.get('description', '')}")
+            if hasattr(pool_mgr, "report_error"):
+                pool_mgr.report_error(username, code, j.get("description", ""))
+            return {"__code9__": True, "desc": j.get("description", ""), "username": username}
         elif code == -12:
-            return {"__code12__": True, "desc": j.get("description", "账号或IP被封禁")}
+            print(f"  🚨 账号 {username} 触发 code=-12！已被风控或单号达限额封锁。")
+            if hasattr(pool_mgr, "report_error"):
+                pool_mgr.report_error(username, -12, j.get("description", ""))
+            return {"__code12__": True, "desc": j.get("description", ""), "username": username}
         else:
             print(f"  ⚠ API code={code}: {j.get('description')}")
             return None
@@ -147,14 +191,24 @@ def call_q4w(sess, target_date: str, body_str: str, need_cipher: bool = True) ->
 def api_left_item(sess, date: str, conditions: list, group_fields: str) -> dict | None:
     """获取指定条件下的分组统计"""
     cond_str = urllib.parse.quote(json.dumps(conditions, separators=(',', ':')))
-    body = f"queryCondition={cond_str}&groupFields={urllib.parse.quote(group_fields)}&facetLimit=1000&cfg=com.lawyee.judge.dc.parse.dto.SearchDataDsoDTO%40leftDataItem&wh=960&ww=1536&cs=0"
-    return call_q4w(sess, date, body, need_cipher=False)
+    body = ""
+    if PAGE_ID:
+        body += f"pageId={PAGE_ID}&"
+    if date:
+        body += f"cprqStart={date}&cprqEnd={date}&"
+    body += f"queryCondition={cond_str}&groupFields={urllib.parse.quote(group_fields)}&facetLimit=1000&cfg=com.lawyee.judge.dc.parse.dto.SearchDataDsoDTO%40leftDataItem&wh=960&ww=1536&cs=0"
+    return call_q4w(sess, date, body, need_cipher=True)
 
 
 # ── 接口C：子法院字典查询 ──────────────────────────────────────────────────
 def api_load_courts(sess, date: str, parent_code: str) -> dict | None:
     """加载子法院列表，返回 {code: name} 映射字典"""
-    body = f"parentCode={parent_code}&cfg=com.lawyee.judge.dc.parse.dto.LoadDicDsoDTO%40loadFyByCode&wh=960&ww=1536&cs=0"
+    body = ""
+    if PAGE_ID:
+        body += f"pageId={PAGE_ID}&"
+    if date:
+        body += f"cprqStart={date}&"
+    body += f"parentCode={parent_code}&cfg=com.lawyee.judge.dc.parse.dto.LoadDicDsoDTO%40loadFyByCode&wh=960&ww=1536&cs=0"
     res = call_q4w(sess, date, body, need_cipher=False)
     if isinstance(res, dict) and "__code9__" in res:
         return res
@@ -166,16 +220,29 @@ def api_load_courts(sess, date: str, parent_code: str) -> dict | None:
 # ── 文书查询 ─────────────────────────────────────────────────────────────
 def fetch_page(sess, date: str, page_num: int, conditions: list) -> dict | None:
     cond_str = urllib.parse.quote(json.dumps(conditions, separators=(',', ':')))
-    body = f"sortFields=s50%3Adesc&pageNum={page_num}&pageSize={PAGE_SIZE}&queryCondition={cond_str}&cfg=com.lawyee.judge.dc.parse.dto.SearchDataDsoDTO%40queryDoc&wh=960&ww=1536&cs=0"
+    body = ""
+    if PAGE_ID:
+        body += f"pageId={PAGE_ID}&"
+    if date:
+        body += f"cprqStart={date}&cprqEnd={date}&"
+    body += f"sortFields=s50%3Adesc&pageNum={page_num}&pageSize={PAGE_SIZE}&queryCondition={cond_str}&cfg=com.lawyee.judge.dc.parse.dto.SearchDataDsoDTO%40queryDoc&wh=960&ww=1536&cs=0"
     return call_q4w(sess, date, body, need_cipher=True)
 
 
 # ── 断点逻辑 ─────────────────────────────────────────────────────────────
 def load_checkpoint() -> dict:
+    default_ckpt = {"completed_tasks": [], "current_task_date": None, "current_task_label": None, "last_page": 0, "total_saved": 0}
     if CHECKPOINT_FILE.exists():
-        with open(CHECKPOINT_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    return {"completed_tasks": [], "current_task_date": None, "current_task_label": None, "last_page": 0, "total_saved": 0}
+        try:
+            with open(CHECKPOINT_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+                for k, v in default_ckpt.items():
+                    if k not in data:
+                        data[k] = v
+                return data
+        except Exception:
+            pass
+    return default_ckpt
 
 def save_checkpoint(ckpt: dict):
     ckpt["updated_at"] = datetime.now().isoformat()
@@ -248,31 +315,30 @@ def crawl_leaf(sess, f, date: str, conditions: list, label: str, total_count: in
                 time.sleep(long_pause)
 
         page_ok = False
-        for retry in range(3):
+        for retry in range(6):
             res = fetch_page(sess, date, pn, conditions)
             if res is None:
                 errors += 1
                 wait = min(10 * (retry + 1), 60)
-                print(f"      [p{pn:03d}] ❌ 网络错误 (retry {retry+1}/3)，等待 {wait}s")
+                print(f"      [p{pn:03d}] ❌ 网络错误 (retry {retry+1}/6)，等待 {wait}s")
                 time.sleep(wait)
                 continue
             if res.get("__code9__"):
-                wait = 30 * (retry + 1)
-                print(f"      [p{pn:03d}] ⚠ code=9 限速/Cookie失效 (retry {retry+1}/3)，等待 {wait}s")
+                wait = 10
+                print(f"      [p{pn:03d}] ⚠ code=9 触发保护，固定等待 {wait}s 重试或重登录 (retry {retry+1}/6)")
                 time.sleep(wait)
                 continue
             if res.get("__code12__"):
-                print(f"\n      🚨 [致命错误] 触发 code=-12！账号或IP已被裁判文书网风控系统封禁！")
-                print(f"      🚨 请立即停止爬取，更换账号或切换IP后再试。")
-                sys.exit(1)
+                print(f"      🚨 账号 {res.get('username')} 遭遇 code=-12！已标记死号 BANNED，立刻切用健康账号...")
+                time.sleep(3)
+                continue
 
             docs = res.get("queryResult", {}).get("resultList", [])
             if not docs:
-                # 可能是真没数据了
                 pass
 
             for doc in docs:
-                f.write(json.dumps(normalize_doc(doc), ensure_ascii=False) + "\n")
+                f.write(json.dumps(normalize_doc(doc, target_count=total_count), ensure_ascii=False) + "\n")
             
             ckpt["total_saved"] += len(docs)
             ckpt["current_task_date"] = date
@@ -281,66 +347,20 @@ def crawl_leaf(sess, f, date: str, conditions: list, label: str, total_count: in
             save_checkpoint(ckpt)
             
             print(f"      [p{pn:03d}] 抓取成功 +{len(docs)} 条 | 累计: {ckpt['total_saved']:,}")
+            
             page_ok = True
             errors = 0
             break
 
         if not page_ok:
-            print(f"      🚨 {label} 第 {pn} 页连续失败，当前节点中止！")
-            sys.exit(1)
+            print(f"      🚨 {label} 第 {pn} 页多次异常，暂停 30s 尝试轮转新号继续...")
+            time.sleep(30)
 
     print(f"    🎉 {label} 节点完成！")
     mark_task_completed(ckpt, task_key)
 
 
-# ── 爬取流程：具体法院下钻 ───────────────────────────────────────────────
-def crawl_court(sess, f, date: str, prov_name: str, court_code: str, court_name: str, count: int, ckpt: dict, max_pages: int):
-    label = f"{prov_name}::{court_code}({court_name})"
-    task_key = f"{date}::{label}"
-    if is_task_completed(ckpt, task_key):
-        return
-
-    conditions = [
-        {"key": "cprq", "value": f"{date} TO {date}"},
-        {"key": "s39", "value": court_code[:3]}, # 省级代码(前三位)
-        {"key": "s40", "value": court_code}
-    ]
-
-    if count <= LIMIT_MAX:
-        # 叶子节点，直接爬
-        crawl_leaf(sess, f, date, conditions, label, count, ckpt, max_pages)
-    else:
-        print(f"    🔍 {label} 数量为 {count} > {LIMIT_MAX}，继续加载下级法院...")
-        delay_request(is_page=False)
-        sub_courts = api_load_courts(sess, date, court_code)
-        
-        if sub_courts is None:
-            print(f"    🚨 {label} 接口C加载下级法院网络异常，强制转为叶子节点爬取。")
-            crawl_leaf(sess, f, date, conditions, label, count, ckpt, max_pages)
-            return
-        elif isinstance(sub_courts, dict) and sub_courts.get("__code9__"):
-            print(f"    🚨 {label} 加载下级法院触发 code=9，退出程序请更新 Cookie。")
-            sys.exit(1)
-        elif len(sub_courts) == 0:
-            print(f"    ⚠️ {label} 无更下级法院可供拆解，只能作为叶子截取前 {LIMIT_MAX} 条。")
-            crawl_leaf(sess, f, date, conditions, label, count, ckpt, max_pages)
-        else:
-            print(f"    ⚠️ 警告: 拆分所有子法庭。")
-            for sub_code, sub_name in sub_courts.items():
-                sub_label = f"{label}::{sub_code}({sub_name})"
-                # 文书网其实不支持单独 s41 下钻如果不带上层，这里简化处理，将 s40 改为 s41
-                # 根据分析，Wenshu 的 s41 是基层法庭。如果在 s40 下还要细分，可以直接用 s41.
-                sub_conds = [
-                    {"key": "cprq", "value": f"{date} TO {date}"},
-                    {"key": "s41", "value": sub_code}
-                ]
-                # 盲爬子法庭（假设最大 600）
-                crawl_leaf(sess, f, date, sub_conds, sub_label, LIMIT_MAX, ckpt, max_pages)
-            
-            mark_task_completed(ckpt, task_key)
-
-
-# ── 爬取流程：省级下钻 ───────────────────────────────────────────────────
+# ── 爬取流程：省级/级联下钻 ───────────────────────────────────────────────────
 def crawl_province(sess, f, date: str, prov_name: str, count: int, ckpt: dict, max_pages: int):
     task_key = f"{date}::{prov_name}"
     if is_task_completed(ckpt, task_key):
@@ -354,41 +374,87 @@ def crawl_province(sess, f, date: str, prov_name: str, count: int, ckpt: dict, m
     if count <= LIMIT_MAX:
         # 省级已经 <= 600，直接作为叶子节点爬取！
         crawl_leaf(sess, f, date, conditions, prov_name, count, ckpt, max_pages)
-    else:
-        # 省级 > 600，需要调用接口 B 下钻到 s40 (法院)
-        print(f"  🔍 {prov_name} 数量为 {count} > {LIMIT_MAX}，正在加载各子法院统计...")
+        mark_task_completed(ckpt, task_key)
+        return
+
+    # 省级 > 600，使用 s39,s40 获取级联树
+    print(f"  🔍 {prov_name} 数量为 {count} > {LIMIT_MAX}，正在获取法院级联树...")
+    group_res = None
+    for retry in range(6):
         delay_request(is_page=False)
         group_res = api_left_item(sess, date, conditions, "s39,s40")
+        if group_res is None or group_res.get("__code9__") or group_res.get("__code12__"):
+            wait = 10 if (group_res and group_res.get("__code9__")) else min(20 * (retry + 1), 60)
+            print(f"  🚨 获取 {prov_name} 法院树异常 (retry {retry+1}/6)，等待 {wait}s 后由号池自愈或重试...")
+            time.sleep(wait)
+            continue
+        break
         
-        if group_res is None or group_res.get("__code9__"):
-            print(f"  🚨 获取 {prov_name} 子法院统计失败 (code9={group_res and group_res.get('__code9__')})，请更新 Cookie 或稍后重试。")
-            sys.exit(1)
-            
-        court_counts = {item["value"]: item["count"] for item in group_res.get("s40", [])}
-        
-        # 还需要调用接口C获取法院名称
-        # province 对应的 parentCode 可以从 group_res 里的 s39 拿到！
-        s39_list = group_res.get("s39", [])
-        if not s39_list:
-            print(f"  ⚠️ {prov_name} 无法获取省级代码(s39)，退化为叶子节点。")
-            crawl_leaf(sess, f, date, conditions, prov_name, count, ckpt, max_pages)
-            return
-
-        prov_code = s39_list[0]["value"] # 例如 北京的 110
-        delay_request(is_page=False)
-        court_names = api_load_courts(sess, date, prov_code)
-        
-        if isinstance(court_names, dict) and court_names.get("__code9__"):
-            print(f"  🚨 获取 {prov_name} 法院字典触发 code=9。")
-            sys.exit(1)
-        if not court_names: court_names = {}
-
-        for court_code, c_count in court_counts.items():
-            c_name = court_names.get(court_code, "未知法院")
-            crawl_court(sess, f, date, prov_name, court_code, c_name, c_count, ckpt, max_pages)
-        
-        print(f"  🎉 省份 {prov_name} 所有子节点遍历完成！")
+    if group_res is None or group_res.get("__code9__") or group_res.get("__code12__"):
+        print(f"  🚨 连续获取 {prov_name} 法院树失败，退化为叶子节点尝试强制爬取。")
+        crawl_leaf(sess, f, date, conditions, prov_name, count, ckpt, max_pages)
         mark_task_completed(ckpt, task_key)
+        return
+
+    # 提取 JSON Tree
+    tree = group_res.get("s39,s40", [])
+    if not tree:
+        print(f"  ⚠️ {prov_name} 树结构为空，退化为叶子节点。")
+        crawl_leaf(sess, f, date, conditions, prov_name, count, ckpt, max_pages)
+        mark_task_completed(ckpt, task_key)
+        return
+
+    # 尝试获取本省中级法院字典
+    s39_dict = {}
+    if tree:
+        first_s39 = tree[0].get("value", "")
+        if len(first_s39) >= 1:
+            prov_code = first_s39[0] + "00"
+            delay_request(is_page=False)
+            dic_res = api_load_courts(sess, date, prov_code)
+            if isinstance(dic_res, dict) and not dic_res.get("__code9__"):
+                s39_dict = dic_res
+
+    # 遍历树状结构
+    for s39_node in tree:
+        s39_code = s39_node.get("value")
+        s39_count = s39_node.get("count", 0)
+        s39_name = s39_dict.get(s39_code, s39_code)
+        s39_label = f"{prov_name}::{s39_name}({s39_code})"
+        
+        if s39_count <= LIMIT_MAX:
+            print(f"    🌟 [中院级下钻] {s39_label} 共 {s39_count} 条 (<= {LIMIT_MAX})，直接捕获！")
+            sub_conds = conditions + [{"key": "s39", "value": s39_code}]
+            crawl_leaf(sess, f, date, sub_conds, s39_label, s39_count, ckpt, max_pages)
+        else:
+            print(f"    🔍 [中院级下钻] {s39_label} 数量为 {s39_count} > {LIMIT_MAX}，继续拆分基层法庭...")
+            children = s39_node.get("childGroupFieldList")
+            if not children:
+                print(f"    ⚠️ {s39_label} 共 {s39_count} 条，但无子节点可供下钻，只能退化截断抓取。")
+                sub_conds = conditions + [{"key": "s39", "value": s39_code}]
+                crawl_leaf(sess, f, date, sub_conds, s39_label, s39_count, ckpt, max_pages)
+                continue
+
+            # 尝试获取该中院下的基层法庭字典
+            s40_dict = {}
+            delay_request(is_page=False)
+            dic_res = api_load_courts(sess, date, s39_code)
+            if isinstance(dic_res, dict) and not dic_res.get("__code9__"):
+                s40_dict = dic_res
+
+            for s40_node in children:
+                s40_code = s40_node.get("value")
+                s40_count = s40_node.get("count", 0)
+                s40_name = s40_dict.get(s40_code, s40_code)
+                s40_label = f"{s39_label}::{s40_name}({s40_code})"
+                
+                print(f"      [基层级下钻] {s40_label} 准备抓取...")
+                sub_conds = conditions + [{"key": "s39", "value": s39_code}, {"key": "s40", "value": s40_code}]
+                crawl_leaf(sess, f, date, sub_conds, s40_label, s40_count, ckpt, max_pages)
+
+    print(f"  🎉 省份 {prov_name} 完整 JSON Tree 遍历完成！")
+    mark_task_completed(ckpt, task_key)
+
 
 
 # ── 爬取流程：日期入口 ───────────────────────────────────────────────────
@@ -400,14 +466,22 @@ def crawl_date(sess, f, date: str, ckpt: dict, max_pages: int):
     print(f"\n========================================================")
     print(f"🚀 正在分析日期: {date}")
     
-    # 获取全国各省分布（接口A）
+    # 获取全国各省分布（接口A）带重试自愈
     conditions = [{"key": "cprq", "value": f"{date} TO {date}"}]
-    delay_request(is_page=False)
-    group_res = api_left_item(sess, date, conditions, "s45;s11;s4;s33;s42;s8;s6;s44")
-    
-    if group_res is None or group_res.get("__code9__"):
-        print(f"🚨 获取 {date} 全国省份分布失败 (code9={group_res and group_res.get('__code9__')})，请更新 Cookie 或稍后重试。")
-        sys.exit(1)
+    group_res = None
+    for retry in range(6):
+        delay_request(is_page=False)
+        group_res = api_left_item(sess, date, conditions, "s45;s11;s4;s33;s42;s8;s6;s44")
+        if group_res is None or group_res.get("__code9__") or group_res.get("__code12__"):
+            wait = 10 if (group_res and group_res.get("__code9__")) else min(20 * (retry + 1), 60)
+            print(f"🚨 获取 {date} 分布异常 (retry {retry+1}/6)，等待 {wait}s 后由号池自愈或重试...")
+            time.sleep(wait)
+            continue
+        break
+        
+    if not group_res or group_res.get("__code9__") or group_res.get("__code12__"):
+        print(f"❌ 连续 6 次尝试获取 {date} 失败，跳过该日期或需手工干预。")
+        return
         
     provinces = group_res.get("s33", [])
     if not provinces:
@@ -447,32 +521,22 @@ def main():
         print("🔄 已重置断点和数据文件，从头开始")
 
     ckpt = load_checkpoint()
-    sess = make_session()
+    pool_mgr = AccountPoolManager(proxy=PROXIES.get("http"))
 
-    # 启动时先验证 session 有效性
-    print("🔍 验证 session...")
-    try:
-        r = sess.post(
-            "https://wenshu.court.gov.cn/website/parse/rest.q4w",
-            headers=get_base_headers(""),
-            data={"cfg": "com.lawyee.wbsttools.web.parse.dto.AppUserDTO@currentUser"}
-        )
-        u = r.json().get("result", {})
-        nm = u.get("userName") or u.get("realName") or u.get("userId") or ""
-        if "anonymous" in str(nm).lower() or not nm:
-            print(f"❌ Session 无效 (anonymous)，请重新登录! 响应: {r.text[:200]}")
-            sys.exit(1)
-        print(f"✅ Session 有效: {nm}")
-    except Exception as e:
-        print(f"❌ Session 验证请求失败: {e}")
+    print("🔍 检查号池状态与初始会话...")
+    sess, acc = pool_mgr.get_active_session()
+    if not sess:
+        print("❌ 当前号池中无法找到或自愈出任何有效 Session，退出。")
         sys.exit(1)
+    print(f"✅ 号池初次就绪，当前上场账号: {acc['username']}")
 
-    if len(ckpt["completed_tasks"]) > 0:
-        print(f"♻️  检测到断点：已完成 {len(ckpt['completed_tasks'])} 个节点。当前总计保存 {ckpt['total_saved']:,} 条。")
+    completed = ckpt.get("completed_tasks", [])
+    if len(completed) > 0:
+        print(f"♻️  检测到断点：已完成 {len(completed)} 个节点。当前总计保存 {ckpt.get('total_saved', 0):,} 条。")
 
     with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
         for target_date in all_dates:
-            crawl_date(sess, f, target_date, ckpt, args.max_pages)
+            crawl_date(pool_mgr, f, target_date, ckpt, args.max_pages)
 
     print(f"\n========================================================")
     print(f"🎉 全部任务结束！共写入 {ckpt['total_saved']:,} 条 → {OUTPUT_FILE}")

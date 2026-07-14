@@ -1,0 +1,31 @@
+{
+  "name": "hello_js_reverse_skill",
+  "version": "1.0.0",
+  "description": "面向 Web 逆向分析与接口签名还原场景的 Skill，围绕 `camoufox-reverse` MCP 构建单一工作流：先用 Camoufox 反检测浏览器完成网络捕获、源码定位、Hook 调试与反检测验证，再按需落地到 Node.js 或 Python 算法还原与自动化调用。",
+  "main": "index.js",
+  "directories": {
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WhiteNightShadow/hello_js_reverse_skill.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/WhiteNightShadow/hello_js_reverse_skill/issues"
+  },
+  "homepage": "https://github.com/WhiteNightShadow/hello_js_reverse_skill#readme",
+  "dependencies": {
+    "axios": "^1.18.1",
+    "crypto-js": "^4.2.0",
+    "jsdom": "^29.1.1",
+    "node-forge": "^1.4.0",
+    "playwright-core": "^1.61.1"
+  }
+}

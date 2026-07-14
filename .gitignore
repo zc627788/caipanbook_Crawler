@@ -1,6 +1,9 @@
 *.csv
 *.jsonl
 *.json
+!**/package.json
+!**/package-lock.json
+!hello_js_reverse_skill/templates/**/*.json
 .gemini/
 .agents/
 __pycache__/

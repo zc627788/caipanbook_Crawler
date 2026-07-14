@@ -1,0 +1,80 @@
+[
+  {
+    "username": "63-9568348610",
+    "password": "Zc627788***",
+    "status": "ACTIVE",
+    "session": "3b55fab2-db64-4f50-b215-b3671702ec07",
+    "holdonkey": "Y2YzNjQxZjEtYmRiYS00ZTg1LWFiNTAtZjY1NjhlNDZkNDgy",
+    "quota_limit": 2000,
+    "current_used": 0,
+    "total_used": 0,
+    "cooldown_until": 0,
+    "last_heal": 1783649938,
+    "error_count": 0
+  },
+  {
+    "username": "63-9568351603",
+    "password": "Zc627788***",
+    "status": "ACTIVE",
+    "session": "",
+    "holdonkey": "",
+    "quota_limit": 2000,
+    "current_used": 0,
+    "total_used": 0,
+    "cooldown_until": 0,
+    "last_heal": 0,
+    "error_count": 0
+  },
+  {
+    "username": "6-39568351815",
+    "password": "Zc627788***",
+    "status": "ACTIVE",
+    "session": "",
+    "holdonkey": "",
+    "quota_limit": 2000,
+    "current_used": 0,
+    "total_used": 0,
+    "cooldown_until": 0,
+    "last_heal": 0,
+    "error_count": 0
+  },
+  {
+    "username": "43-67840923340",
+    "password": "Zc627788***",
+    "status": "ACTIVE",
+    "session": "",
+    "holdonkey": "",
+    "quota_limit": 2000,
+    "current_used": 0,
+    "total_used": 0,
+    "cooldown_until": 0,
+    "last_heal": 0,
+    "error_count": 0
+  },
+  {
+    "username": "43-67840924186",
+    "password": "Zc627788***",
+    "status": "ACTIVE",
+    "session": "",
+    "holdonkey": "",
+    "quota_limit": 2000,
+    "current_used": 0,
+    "total_used": 0,
+    "cooldown_until": 0,
+    "last_heal": 0,
+    "error_count": 0
+  },
+  {
+    "username": "43-67840924264",
+    "password": "Zc627788***",
+    "status": "ACTIVE",
+    "session": "",
+    "holdonkey": "",
+    "quota_limit": 2000,
+    "current_used": 0,
+    "total_used": 0,
+    "cooldown_until": 0,
+    "last_heal": 0,
+    "error_count": 0
+  }
+]
