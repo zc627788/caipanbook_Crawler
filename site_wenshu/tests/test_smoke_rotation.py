@@ -105,13 +105,17 @@ def main():
         print("==========================================================================")
 
     finally:
-        # 恢复生产状态与配额：200 次请求
-        print("\n🧹 正在将号池各账号恢复至生产环境安全限额 (quota_limit = 200，并重置测试状态)...")
+        # 恢复生产状态与配额：日预算 500
+        print("\n🧹 正在将号池恢复至生产日预算 (quota_limit = 500)...")
+        from utils.account_pool import DEFAULT_DAILY_BUDGET
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
         for orig in original_accounts:
             for cur in pool_mgr.accounts:
                 if cur["username"] == orig["username"]:
-                    cur["quota_limit"] = 200
+                    cur["quota_limit"] = DEFAULT_DAILY_BUDGET
                     cur["current_used"] = 0
+                    cur["budget_date"] = today
                     if cur["status"] == "COOLDOWN" and orig["status"] == "ACTIVE":
                         cur["status"] = "ACTIVE"
         pool_mgr.save_pool()

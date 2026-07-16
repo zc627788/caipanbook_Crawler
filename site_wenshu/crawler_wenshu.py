@@ -40,11 +40,14 @@ LIMIT_MAX  = 600
 OUTPUT_FILE     = BASE_DIR / "wenshu_2015mon.jsonl"
 CHECKPOINT_FILE = BASE_DIR / "crawler_checkpoint.json"
 
-# ── 网络配置 ──────────────────────────────────────────────────────────────
+# ── 网络配置（2026-07 探底后：降 delay、去仿生长停顿、日预算见 account_pool）──
 PROXIES = {"http": "http://127.0.0.1:10808", "https": "http://127.0.0.1:10808"}
-DELAY_MIN = 3.0   # 基础翻页速度（像人一样快速浏览）
-DELAY_MAX = 6.0   
-MAX_ERRORS = 5    
+DELAY_MIN = 2.0   # 页间间隔下限（探底短测 0.5s 可过，生产取 2~3s）
+DELAY_MAX = 3.0
+DELAY_NAV_MIN = 3.0   # 切换省/法院
+DELAY_NAV_MAX = 5.0
+ENABLE_BIO_PAUSE = False  # 关闭「分心/倒水」长停顿；无 currentUser 心跳
+MAX_ERRORS = 5
 
 # ── 分类码与字段映射 ──────────────────────────────────────────────────────
 CASE_TYPE_MAP = {
@@ -143,8 +146,11 @@ def call_q4w(pool_mgr, target_date: str, body_str: str, need_cipher: bool = True
         if hasattr(pool_mgr, "get_active_session"):
             sess, acc = pool_mgr.get_active_session()
             if not sess:
-                print("  🚨 [号池调度] 当前所有账号处于冷却或无有效会话，休眠 30 秒等待解冻...")
-                time.sleep(30)
+                # 日预算耗尽：立即返回，不空转 30s
+                if hasattr(pool_mgr, "daily_budget_remaining") and pool_mgr.daily_budget_remaining() <= 0:
+                    return {"__budget_done__": True, "desc": "今日日预算已用尽"}
+                print("  🚨 [号池调度] 暂无可用会话，等待 15s 后重试一次...")
+                time.sleep(15)
                 sess, acc = pool_mgr.get_active_session()
                 if not sess:
                     return {"__code9__": True, "desc": "无可用会话"}
@@ -163,7 +169,20 @@ def call_q4w(pool_mgr, target_date: str, body_str: str, need_cipher: bool = True
             if hasattr(pool_mgr, "report_request"):
                 should_switch = pool_mgr.report_request(username, count=1)
                 if should_switch:
-                    print(f"  ♻️ [限额轮转] 账号 {username} 本轮连续发包已达 200 次安全上限，放回池中休眠 30 分钟。下轮将自动切用新号接棒！")
+                    print(
+                        f"  ♻️ [日预算] 账号 {username} 今日发包已达上限，"
+                        f"冷却至次日 0 点（或换号继续）。"
+                    )
+                    return_data = None
+                    if isinstance(j["result"], str):
+                        dec = decrypt_result(j["result"], j["secretKey"], date_str)
+                        return_data = json.loads(dec)
+                    else:
+                        return_data = j["result"]
+                    # 附带预算耗尽标记，供上层优雅停机
+                    if isinstance(return_data, dict):
+                        return_data = {**return_data, "__budget_done__": True, "username": username}
+                    return return_data
             if isinstance(j["result"], str):
                 dec = decrypt_result(j["result"], j["secretKey"], date_str)
                 return json.loads(dec)
@@ -262,10 +281,8 @@ def mark_task_completed(ckpt: dict, task_key: str):
 
 def delay_request(is_page=True):
     if not is_page:
-        # 切换省份/法院（模拟退回主页重新点击的过程，耗时稍长）
-        delay = random.uniform(5.5, 9.5)
+        delay = random.uniform(DELAY_NAV_MIN, DELAY_NAV_MAX)
     else:
-        # 正常的每页之间点击（相对较快）
         delay = random.uniform(DELAY_MIN, DELAY_MAX)
     time.sleep(delay)
 
@@ -299,19 +316,23 @@ def crawl_leaf(sess, f, date: str, conditions: list, label: str, total_count: in
     
     errors = 0
     for pn in range(start_page, total_pages + 1):
+        # 日预算耗尽：优雅停机，保留断点次日续跑
+        if hasattr(sess, "daily_budget_remaining") and sess.daily_budget_remaining() <= 0:
+            print("    ⏹ 今日号池预算已用尽，保留断点，结束本节点翻页。")
+            save_checkpoint(ckpt)
+            return
+
         delay_request(is_page=True)
-        
-        # 模拟真实人类的“多级疲劳/分心”机制
-        if pn > 1:
-            # 1. 小分心：每看 6~9 页，低头回个微信（停顿 8~15秒）
+
+        # 可选仿生长停顿（默认关闭，避免拖慢；非 currentUser 心跳）
+        if ENABLE_BIO_PAUSE and pn > 1:
             if pn % random.randint(6, 9) == 0:
-                short_pause = random.uniform(8.0, 15.0)
-                print(f"      📱 模拟分心看手机，暂停 {short_pause:.1f} 秒...")
+                short_pause = random.uniform(5.0, 10.0)
+                print(f"      📱 短停顿 {short_pause:.1f}s...")
                 time.sleep(short_pause)
-            # 2. 大休息：每看 25~35 页，去倒杯水/上个厕所（停顿 30~45秒）
             elif pn % random.randint(25, 35) == 0:
-                long_pause = random.uniform(30.0, 45.0)
-                print(f"      🚶 模拟人类起立休息，暂停 {long_pause:.1f} 秒...")
+                long_pause = random.uniform(15.0, 25.0)
+                print(f"      🚶 长停顿 {long_pause:.1f}s...")
                 time.sleep(long_pause)
 
         page_ok = False
@@ -323,38 +344,48 @@ def crawl_leaf(sess, f, date: str, conditions: list, label: str, total_count: in
                 print(f"      [p{pn:03d}] ❌ 网络错误 (retry {retry+1}/6)，等待 {wait}s")
                 time.sleep(wait)
                 continue
+            if isinstance(res, dict) and res.get("__budget_done__") and not res.get("queryResult"):
+                print("    ⏹ 今日日预算已用尽，保留断点，今日停机。")
+                save_checkpoint(ckpt)
+                return
             if res.get("__code9__"):
                 wait = 10
-                print(f"      [p{pn:03d}] ⚠ code=9 触发保护，固定等待 {wait}s 重试或重登录 (retry {retry+1}/6)")
+                print(f"      [p{pn:03d}] ⚠ code=9 触发保护，等待 {wait}s 重试/重登录 (retry {retry+1}/6)")
                 time.sleep(wait)
                 continue
             if res.get("__code12__"):
-                print(f"      🚨 账号 {res.get('username')} 遭遇 code=-12！已标记死号 BANNED，立刻切用健康账号...")
+                print(f"      🚨 账号 {res.get('username')} code=-12，已 BANNED，尝试切号...")
                 time.sleep(3)
+                if hasattr(sess, "daily_budget_remaining") and sess.daily_budget_remaining() <= 0:
+                    save_checkpoint(ckpt)
+                    return
                 continue
 
             docs = res.get("queryResult", {}).get("resultList", [])
-            if not docs:
-                pass
-
             for doc in docs:
                 f.write(json.dumps(normalize_doc(doc, target_count=total_count), ensure_ascii=False) + "\n")
-            
+
             ckpt["total_saved"] += len(docs)
             ckpt["current_task_date"] = date
             ckpt["current_task_label"] = label
             ckpt["last_page"] = pn
             save_checkpoint(ckpt)
-            
+
             print(f"      [p{pn:03d}] 抓取成功 +{len(docs)} 条 | 累计: {ckpt['total_saved']:,}")
-            
+
             page_ok = True
             errors = 0
+            if isinstance(res, dict) and res.get("__budget_done__"):
+                print("    ⏹ 触发日预算上限，保留断点，今日停机。")
+                return
             break
 
         if not page_ok:
-            print(f"      🚨 {label} 第 {pn} 页多次异常，暂停 30s 尝试轮转新号继续...")
-            time.sleep(30)
+            print(f"      🚨 {label} 第 {pn} 页多次异常，暂停 15s 后由号池切号重试...")
+            time.sleep(15)
+            if hasattr(sess, "daily_budget_remaining") and sess.daily_budget_remaining() <= 0:
+                save_checkpoint(ckpt)
+                return
 
     print(f"    🎉 {label} 节点完成！")
     mark_task_completed(ckpt, task_key)
@@ -505,41 +536,81 @@ def crawl_date(sess, f, date: str, ckpt: dict, max_pages: int):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="裁判文书网日批采集（日预算 / 降 delay / 无心跳）")
     parser.add_argument("--reset", action="store_true", help="忽略断点，重新开始")
     parser.add_argument("--max-pages", type=int, default=-1, help="叶子节点最大页数")
+    parser.add_argument(
+        "--proxy",
+        default=None,
+        help="默认代理，如 http://127.0.0.1:10808；空字符串表示直连。账号 current_proxy 优先",
+    )
+    parser.add_argument("--bio-pause", action="store_true", help="开启仿生长停顿（默认关）")
     args = parser.parse_args()
 
+    global ENABLE_BIO_PAUSE
+    if args.bio_pause:
+        ENABLE_BIO_PAUSE = True
+
     start_date = datetime.strptime(CPRQ_START, "%Y-%m-%d")
-    end_date   = datetime.strptime(CPRQ_END, "%Y-%m-%d")
-    all_dates = [(start_date + timedelta(days=i)).strftime("%Y-%m-%d") 
-                 for i in range((end_date - start_date).days + 1)]
+    end_date = datetime.strptime(CPRQ_END, "%Y-%m-%d")
+    all_dates = [
+        (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        for i in range((end_date - start_date).days + 1)
+    ]
 
     if args.reset:
-        if CHECKPOINT_FILE.exists(): CHECKPOINT_FILE.unlink()
-        if OUTPUT_FILE.exists(): OUTPUT_FILE.unlink()
+        if CHECKPOINT_FILE.exists():
+            CHECKPOINT_FILE.unlink()
+        if OUTPUT_FILE.exists():
+            OUTPUT_FILE.unlink()
         print("🔄 已重置断点和数据文件，从头开始")
 
+    default_proxy = PROXIES.get("http") if args.proxy is None else args.proxy
     ckpt = load_checkpoint()
-    pool_mgr = AccountPoolManager(proxy=PROXIES.get("http"))
+    pool_mgr = AccountPoolManager(proxy=default_proxy or "")
 
     print("🔍 检查号池状态与初始会话...")
+    print(
+        f"   日预算策略 | delay={DELAY_MIN}~{DELAY_MAX}s | "
+        f"bio_pause={ENABLE_BIO_PAUSE} | 今日剩余预算≈{pool_mgr.daily_budget_remaining()}"
+    )
     sess, acc = pool_mgr.get_active_session()
     if not sess:
-        print("❌ 当前号池中无法找到或自愈出任何有效 Session，退出。")
+        remain = pool_mgr.daily_budget_remaining()
+        if remain <= 0:
+            print("⏹ 今日日预算已用尽，本周期结束。请次日 0 点后或明日定时任务再跑（计数自动清零）。")
+            sys.exit(0)
+        print("❌ 号池无可用 Session（需登录或全员 BANNED），退出。")
         sys.exit(1)
-    print(f"✅ 号池初次就绪，当前上场账号: {acc['username']}")
+    print(
+        f"✅ 上场账号: {acc['username']} | "
+        f"今日已用 {acc.get('current_used', 0)}/{acc.get('quota_limit', 500)} | "
+        f"proxy={acc.get('current_proxy') or default_proxy or '(直连)'}"
+    )
 
     completed = ckpt.get("completed_tasks", [])
     if len(completed) > 0:
-        print(f"♻️  检测到断点：已完成 {len(completed)} 个节点。当前总计保存 {ckpt.get('total_saved', 0):,} 条。")
+        print(
+            f"♻️  断点：已完成 {len(completed)} 个节点，累计保存 {ckpt.get('total_saved', 0):,} 条。"
+        )
 
+    stopped_for_budget = False
     with open(OUTPUT_FILE, "a", encoding="utf-8") as f:
         for target_date in all_dates:
+            if pool_mgr.daily_budget_remaining() <= 0:
+                stopped_for_budget = True
+                print(f"\n⏹ 今日预算用尽，停止后续日期。断点已保存，下一周期（明日）自动续跑。")
+                break
             crawl_date(pool_mgr, f, target_date, ckpt, args.max_pages)
 
     print(f"\n========================================================")
-    print(f"🎉 全部任务结束！共写入 {ckpt['total_saved']:,} 条 → {OUTPUT_FILE}")
+    if stopped_for_budget:
+        print(
+            f"📅 本周期（今日）结束：预算触顶。已写入 {ckpt['total_saved']:,} 条 → {OUTPUT_FILE}"
+        )
+        print("   下一周期：自然日切换后 current_used 清零，定时任务再执行即可。")
+    else:
+        print(f"🎉 全部任务结束！共写入 {ckpt['total_saved']:,} 条 → {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":
