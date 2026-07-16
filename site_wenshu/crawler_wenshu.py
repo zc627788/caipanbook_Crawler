@@ -171,7 +171,7 @@ def call_q4w(pool_mgr, target_date: str, body_str: str, need_cipher: bool = True
                 if should_switch:
                     print(
                         f"  ♻️ [日预算] 账号 {username} 今日发包已达上限，"
-                        f"冷却至次日 0 点（或换号继续）。"
+                        f"状态已改为 EXPIRED（过期），今日停机 / 换号。"
                     )
                     return_data = None
                     if isinstance(j["result"], str):

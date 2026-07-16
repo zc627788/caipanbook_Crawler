@@ -4,13 +4,14 @@
 
 状态：
   ACTIVE   — 当日可用
-  COOLDOWN — 当日预算用尽，等到下一自然日 0 点自动解冻
-  EXPIRED  — 会话失效，待自愈登录
+  EXPIRED  — 会话失效，或当日预算用尽后标记「过期」；次日预算清零后自愈重登再变 ACTIVE
+  COOLDOWN — 仅登录自愈连续失败等短冷却（非日预算）
   BANNED   — code=-12 永久隔离
 
 日预算（2026-07 探底结论）：
   单号约 ~850 次 rest.q4w 触发 -12；生产默认每日 500 次安全预算。
-  周期按本地自然日：跨日后 current_used 清零，进入下一周期。
+  周期按本地自然日：当日跑满 500 → ACTIVE 改为 EXPIRED；跨日 current_used 清零，
+  下次任务从 EXPIRED 走登录自愈进入新周期。
 """
 
 from __future__ import annotations
@@ -117,10 +118,13 @@ class AccountPoolManager:
 
     def refresh_daily_budgets(self) -> int:
         """
-        跨自然日：清零当日计数，解冻仅因日预算进入的 COOLDOWN。
-        返回解冻/重置账号数。
+        跨自然日：清零当日计数。
+        - 因日预算打成 EXPIRED 的号：保持 EXPIRED，下次 get 时自愈重登 → ACTIVE
+        - 登录失败 COOLDOWN 且已到期：解冻为 EXPIRED 以便重登
+        返回重置账号数。
         """
         today = _today_str()
+        now = int(time.time())
         n = 0
         for acc in self.accounts:
             if acc.get("status") == "BANNED":
@@ -128,15 +132,19 @@ class AccountPoolManager:
             if acc.get("budget_date") != today:
                 old_date = acc.get("budget_date")
                 old_used = acc.get("current_used", 0)
+                old_status = acc.get("status")
                 acc["budget_date"] = today
                 acc["current_used"] = 0
-                if acc.get("status") == "COOLDOWN":
-                    acc["status"] = "ACTIVE"
+                # 日预算打成的 EXPIRED：保持过期，等自愈
+                # 短冷却若已过期：改为 EXPIRED 走重登，而不是直接 ACTIVE 复用旧会话
+                if acc.get("status") == "COOLDOWN" and now >= int(acc.get("cooldown_until") or 0):
+                    acc["status"] = "EXPIRED"
                     acc["cooldown_until"] = 0
                 n += 1
                 print(
                     f"📅 [日周期重置] {acc['username']}: "
-                    f"{old_date or '?'} used={old_used} → {today} used=0 ACTIVE"
+                    f"{old_date or '?'} used={old_used} status={old_status} "
+                    f"→ {today} used=0 status={acc.get('status')}"
                 )
         if n:
             self.save_pool()
@@ -192,15 +200,15 @@ class AccountPoolManager:
         return False
 
     def _mark_daily_exhausted(self, acc: dict, reason: str = "日预算"):
-        now = int(time.time())
-        acc["status"] = "COOLDOWN"
-        acc["cooldown_until"] = _next_midnight_ts()
-        # 保留 current_used 便于审计；跨日 refresh 时清零
-        left = max(0, acc["cooldown_until"] - now)
+        """当日预算用尽：ACTIVE → EXPIRED（过期），次日清零后再自愈。"""
+        prev = acc.get("status")
+        acc["status"] = "EXPIRED"
+        acc["cooldown_until"] = 0
+        # 保留 current_used / session 便于审计；跨日 refresh 清零 used，自愈时换新 session
         print(
             f"♻️  [{reason}] 账号 {acc['username']} 今日已用 "
             f"{acc.get('current_used', 0)}/{acc.get('quota_limit', DEFAULT_DAILY_BUDGET)}，"
-            f"冷却至次日 0 点（约 {left // 3600}h{(left % 3600) // 60}m）。"
+            f"状态 {prev} → EXPIRED（过期）。次日预算清零后将自动重登再跑。"
         )
         self.save_pool()
 
