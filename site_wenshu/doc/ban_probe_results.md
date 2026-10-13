@@ -1,7 +1,7 @@
 # 文书网封号阈值探底结果
 
-> 配套脚本：`tests/probe_ban_threshold.py`  
-> 日志目录：`probe_logs/`  
+> 配套脚本：`tests/probe_ban_threshold.py`
+> 日志目录：`probe_logs/`
 > 更新方式：每完成一个阶段，把结论填进对应表格。
 
 ---
@@ -155,7 +155,7 @@ python tests/probe_ban_threshold.py --slot B --mode volume --interval 4 --target
 
 | 账号 | total_used | 备注 |
 |------|------------|------|
-| 63-9568348610 | 8 | 异常低量封禁 |
+| REDACTED_ACCOUNT_VALUE | 8 | 异常低量封禁 |
 | 63-9568351603 | 600 | |
 | 63-9568351815 | 600 | |
 | 43-67840923340 | 1000 | |

@@ -1,7 +1,7 @@
 # 裁判文书网 (wenshu.court.gov.cn) 全链路逆向分析与协议层自动化采集工程指南
 
-> **文档版本**：v2.5 (Pro-Release)  
-> **更新日期**：2026-07-10  
+> **文档版本**：v2.5 (Pro-Release)
+> **更新日期**：2026-07-10
 > **核心突破**：彻底攻克基于网宿 WAF (Wangsu/WZWS) 的 SSL/TLS Client Hello (JA3) 与 User-Agent 底层会话指纹强绑定，实现数百万量级生产环境下的纯协议层 (`curl_cffi` 闭环) 自动化高并发采集。
 
 ---
@@ -100,7 +100,7 @@ def encrypt_pwd(plain: str) -> str:
 
 ### 3.2 验证码获取与自动重试机制
 登录接口 `POST https://account.court.gov.cn/api/login` 必须附带以下核心表单参数：
-* `username`: 实名标识字符串（如 `"63-9568348610"`，由国家码 `+63` 与手机号组合）；
+* `username`: 实名标识字符串（如 `"REDACTED_ACCOUNT_VALUE"`，由国家码 `+63` 与手机号组合）；
 * `password`: RSA 加密后的 URL 编码字符串；
 * `bizToken` 与 `imgVerifyToken`: 来源于 DOM 中的隐藏输入框 `<input name="token" type="hidden" value="...">`，这两者在页面初始化时由服务端随机下发，在提交时作为验证码的上下文关联票据；
 * `appDomain`: 目标应用域 `"wenshu.court.gov.cn"`；
@@ -114,8 +114,8 @@ def encrypt_pwd(plain: str) -> str:
 
 这是本系统的**理论灵魂与最核心的逆向突破点**。许多工程师在尝试逆向对接文书网时，通常会卡在这个看似诡异的幽灵 Bug 上：
 
-> **典型错误症状**：  
-> 使用 `Playwright` 打开浏览器完成了登录，并使用 `page.evaluate(...)` 内部发起 `/website/parse/rest.q4w` 请求验证 `AppUserDTO@currentUser`，返回 `{ "realName": "63-9568348610", "code": 1 }` (验证完全通过)！  
+> **典型错误症状**：
+> 使用 `Playwright` 打开浏览器完成了登录，并使用 `page.evaluate(...)` 内部发起 `/website/parse/rest.q4w` 请求验证 `AppUserDTO@currentUser`，返回 `{ "realName": "REDACTED_ACCOUNT_VALUE", "code": 1 }` (验证完全通过)！
 > 但只要把 `SESSION` (例如 `ba4d24fb-...`) 和 `HOLDONKEY` Cookie 从 Playwright 导出存入 `session.json`，在单独开启的 Python `requests` 或 `curl_cffi` 中一发请求，立刻返回 `{ "userId": "anonymousUser", "realName": "匿名" }`，接着调用查询接口立刻报 `code: 9 (没有权限请求接口)`。
 
 ### 4.1 深入解密网宿 WAF (Wangsu/wzws) 底层指纹绑定原理
@@ -135,8 +135,8 @@ sequenceDiagram
     Wangsu->>Backend: 校验 OAuth code 授权合法性
     Backend-->>Wangsu: 允许访问并下发新会话 UUID
     Wangsu-->>Playwright: Set-Cookie: SESSION=ba4d24fb... <br/> [底层动作：将 SESSION 强绑定到 Chrome 148 的 SSL Connection & JA3 指纹 A]
-    
-    Note over Playwright,Backend: 浏览器内部继续验证 currentUser -> SSL 通道/指纹 A 吻合 -> ✅ 返回 "63-9568348610"
+
+    Note over Playwright,Backend: 浏览器内部继续验证 currentUser -> SSL 通道/指纹 A 吻合 -> ✅ 返回 "REDACTED_ACCOUNT_VALUE"
 
     Note over Playwright,CFFI: 【阶段二：Cookie 跨进程导出与发包劫持误报】
     Playwright->>CFFI: 复制 SESSION=ba4d24fb... 与 HOLDONKEY
@@ -181,7 +181,7 @@ sequenceDiagram
    r_cb = s.get(oauth_url, allow_redirects=True, timeout=20)
    ```
 6. **成功获取绑定到 `curl_cffi` 的专属 `SESSION`**：
-   这时候从 `s.cookies` 中拿出的 `SESSION` (`3b55fab2-...`)，从诞生第一毫秒起就牢牢绑定在了 `curl_cffi (chrome120)` 底层的 SSL/TLS Client Hello 上！此后在本机无论跑多久的 Python 纯协议采集，都保持 100% 实名在线（`63-9568348610`），永远不会再遇到 `code: 9`。
+   这时候从 `s.cookies` 中拿出的 `SESSION` (`3b55fab2-...`)，从诞生第一毫秒起就牢牢绑定在了 `curl_cffi (chrome120)` 底层的 SSL/TLS Client Hello 上！此后在本机无论跑多久的 Python 纯协议采集，都保持 100% 实名在线（`REDACTED_ACCOUNT_VALUE`），永远不会再遇到 `code: 9`。
 
 ---
 
@@ -230,11 +230,11 @@ def encrypt_ciphertext(timestamp_ms: int, salt: str, date_str: str) -> str:
     """构建请求 ciphertext 3DES 密文"""
     # 明文规范："{timestamp}#{salt}#{date}"
     plain = f"{timestamp_ms}#{salt}#{date_str}"
-    
+
     # 动态构建 24 Bytes DES3 密钥
     key_bytes = _make_des3_key(date_str, salt)
     iv_bytes  = _make_des3_iv(date_str)
-    
+
     cipher = DES3.new(key_bytes, DES3.MODE_CBC, iv_bytes)
     padded = pad(plain.encode("utf-8"), DES3.block_size, style="pkcs7")
     encrypted = cipher.encrypt(padded)
@@ -250,7 +250,7 @@ def decrypt_result(result_b64: str, secret_key: str, date_str: str) -> str:
     enc_bytes = base64.b64decode(result_b64)
     key_bytes = _make_des3_key(date_str, secret_key)
     iv_bytes  = _make_des3_iv(date_str)
-    
+
     cipher = DES3.new(key_bytes, DES3.MODE_CBC, iv_bytes)
     decrypted_padded = cipher.decrypt(enc_bytes)
     decrypted = unpad(decrypted_padded, DES3.block_size, style="pkcs7")
@@ -313,14 +313,14 @@ def crawl_leaf(sess, f, date: str, conditions: list, label: str, total_count: in
     for pn in range(start_page, total_pages + 1):
         # 0. 每次请求的基础正态翻页速度 (像真实人类快速浏览文本，3~6秒)
         delay_request(is_page=True) # sleep(3.0 ~ 6.0s)
-        
+
         if pn > 1:
             # 1. 小分心 (Micro-Pause)：模拟每连看 6~9 页时，低头回一两个微信或处理消息
             if pn % random.randint(6, 9) == 0:
                 short_pause = random.uniform(8.0, 15.0)
                 print(f"      📱 模拟分心看手机，暂停 {short_pause:.1f} 秒...")
                 time.sleep(short_pause)
-                
+
             # 2. 大休眠 (Macro-Pause)：模拟每连看 25~35 页，起立去洗手间或倒一杯茶水
             elif pn % random.randint(25, 35) == 0:
                 long_pause = random.uniform(30.0, 45.0)
@@ -389,7 +389,7 @@ D:\裁判文书逆向\site_wenshu\
 ```powershell
 python test_wenshu_api.py
 ```
-> **系统反馈**：  
+> **系统反馈**：
 > 此时程序会自动调起后台表单、OCR 识别验证码、使用 `curl_cffi` 底层原生完成 `/api/login` 中台登录及 OAuth 302 跳转回调闭环，并在终端打印：
 > ```text
 > 🚀 curl_cffi 正在调用 /api/login ...
@@ -398,7 +398,7 @@ python test_wenshu_api.py
 > ⏳ [3/5] curl_cffi 原生执行 OAuth 回调跳转...
 > 👉 获得专属 SESSION:   3b55fab2-db64-4f50-b215-b3671702ec07
 > ⏳ [4/5] 验证 currentUser...
-> 📡 验证返回用户名: 63-9568348610
+> 📡 验证返回用户名: REDACTED_ACCOUNT_VALUE
 > 🎉 成功！已将完全绑定给 curl_cffi 的凭据写入 session.json！
 > ```
 
@@ -413,8 +413,8 @@ python -u crawler_wenshu.py
 # 忽略断点从头重置全部数据重新跑（危险操作请确认）
 python -u crawler_wenshu.py --reset
 ```
-> **系统反馈**：  
-> 程序自启动验证 `✅ Session 有效: 63-9568348610` 后，将自动展开全国各类省市、各级下属法院的三级递归树遍历，并在多级人类仿生休眠模型的保驾护航下，源源不断地向输出目标以 JSONL 格式倾泻结构化真实裁判数据。
+> **系统反馈**：
+> 程序自启动验证 `✅ Session 有效: REDACTED_ACCOUNT_VALUE` 后，将自动展开全国各类省市、各级下属法院的三级递归树遍历，并在多级人类仿生休眠模型的保驾护航下，源源不断地向输出目标以 JSONL 格式倾泻结构化真实裁判数据。
 
 ---
 

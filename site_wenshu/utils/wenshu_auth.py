@@ -5,6 +5,7 @@
 让最终的 SESSION 彻底绑定到 curl_cffi (chrome120) 的 TLS 指纹中，
 解密为什么之前 crawler_wenshu.py 会返回 code-9 与匿名问题！
 """
+import os
 import json
 import time
 import sys
@@ -31,9 +32,9 @@ def encrypt_pwd(plain: str) -> str:
     enc = cipher.encrypt(plain.encode('utf-8'))
     return urllib.parse.quote(base64.b64encode(enc).decode('utf-8'))
 
-USERNAME_FULL = "63-9568348610"
-PHONE_NUMBER  = "9568348610"
-PASSWORD      = "Zc627788***"
+USERNAME_FULL = os.environ.get("WENSHU_USERNAME", "")
+PHONE_NUMBER = os.environ.get("WENSHU_PHONE_NUMBER", "")
+PASSWORD = os.environ.get("WENSHU_PASSWORD", "")
 PROXY_SERVER  = "http://127.0.0.1:10808"
 
 def wait_for_form(page, timeout=25):
@@ -95,12 +96,12 @@ def login_account(username: str, password: str, proxy: str = PROXY_SERVER, max_r
                 context = browser.new_context(proxy={"server": proxy} if proxy else None)
                 page = context.new_page()
                 page.goto(oauth_url, wait_until="domcontentloaded", timeout=30000)
-                
+
                 if not wait_for_form(page, timeout=25):
                     print("  ❌ 登录表单加载超时")
                     browser.close()
                     continue
-                    
+
                 page.wait_for_timeout(1000)
 
                 # 把 Playwright 获得的初始化 cookie 同步给 curl_cffi Session

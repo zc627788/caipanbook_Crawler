@@ -1,3 +1,4 @@
+import os
 import requests
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
@@ -15,8 +16,8 @@ def encrypt_password(password):
     encrypted_base64 = base64.b64encode(encrypted_bytes).decode('utf-8')
     return urllib.parse.quote(encrypted_base64)
 
-username = "63-9568348610"
-password = "Zc627788***" # We will just use what the user provided, actually the user said 'Zc627788***' but maybe they meant the literal string or it's masked. Assuming they masked it. If it's masked, login will fail with wrong password, but we can see if it prompts for a captcha!
+username = os.environ.get("WENSHU_USERNAME", "")
+password = os.environ.get("WENSHU_PASSWORD", "")
 
 encrypted_pwd = encrypt_password(password)
 print("Encrypted:", encrypted_pwd)

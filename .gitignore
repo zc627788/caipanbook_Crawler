@@ -9,3 +9,9 @@
 __pycache__/
 *.pyc
 site_wenshu/config/*.png
+
+# Reproducible local portfolio outputs
+docs/portfolio/sample-output/
+!docs/portfolio/verification.json
+.env
+.env.*

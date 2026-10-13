@@ -167,7 +167,7 @@ fetch("https://account.court.gov.cn/captcha/validate", {
   "mode": "cors",
   "credentials": "include"
 });
-response 
+response
 {
     "code": 0,
     "data": {
@@ -207,7 +207,7 @@ fetch("https://account.court.gov.cn/api/login", {
     "x-requested-with": "XMLHttpRequest"
   },
   "referrer": "https://account.court.gov.cn/app?back_url=https%3A%2F%2Faccount.court.gov.cn%2Foauth%2Fauthorize%3Fresponse_type%3Dcode%26client_id%3Dzgcpwsw%26redirect_uri%3Dhttps%253A%252F%252Fwenshu.court.gov.cn%252FCallBackController%252FauthorizeCallBack%26state%3D388558ae-5db7-4f69-a58b-99e572d7bfbe%26timestamp%3D1783502321288%26signature%3D6C23CBFDB6EE0060EC4322F08661FB07779269F880028A39F3F45AC84849B512%26scope%3Duserinfo",
-  "body": "username=63-9568348610&password=JvrC%252BRXaEyVhOBhiaadPU2gP95lHlXjKEp8YUjh6cIz3f0oxUGmBEwE0FHIturp9S43V4w0Be1tx1ulM4yA9oKo%252FzR4Z2nTX2%252BkXdkRBhVnVHFG1B6I71jxtmRPYJ7qYQJYgbWVlAecgaEwfW%252BzZHgnSuxq5BOGQKXH%252BJB5Q%252FOC0kH2nyyP8%252BU6DpjYRsmQKG9WgmbhHTUOyO9da9aZM%252FP471onrWv15lFziiKkx%252F4L%252FVXwR6oqH1Nbz7bn0wVa6Feo1bcxoQTlIus15MKIdD8pX8WmXB7PPS%252FAW6K05GPuh6CY1PZWBXIFB100AgOOARPkOgofn1AMvZoKpDX%252BNYg%253D%253D&bizToken=016286d9-3a70-475f-b199-2fd50ca282c3&imgVerifyToken=016286d9-3a70-475f-b199-2fd50ca282c3&appDomain=wenshu.court.gov.cn",
+  "body": "username=REDACTED_ACCOUNT_VALUE&password=JvrC%252BRXaEyVhOBhiaadPU2gP95lHlXjKEp8YUjh6cIz3f0oxUGmBEwE0FHIturp9S43V4w0Be1tx1ulM4yA9oKo%252FzR4Z2nTX2%252BkXdkRBhVnVHFG1B6I71jxtmRPYJ7qYQJYgbWVlAecgaEwfW%252BzZHgnSuxq5BOGQKXH%252BJB5Q%252FOC0kH2nyyP8%252BU6DpjYRsmQKG9WgmbhHTUOyO9da9aZM%252FP471onrWv15lFziiKkx%252F4L%252FVXwR6oqH1Nbz7bn0wVa6Feo1bcxoQTlIus15MKIdD8pX8WmXB7PPS%252FAW6K05GPuh6CY1PZWBXIFB100AgOOARPkOgofn1AMvZoKpDX%252BNYg%253D%253D&bizToken=016286d9-3a70-475f-b199-2fd50ca282c3&imgVerifyToken=016286d9-3a70-475f-b199-2fd50ca282c3&appDomain=wenshu.court.gov.cn",
   "method": "POST",
   "mode": "cors",
   "credentials": "include"
@@ -217,12 +217,12 @@ HOLDONKEY MjYxNzdkODAtNWFlZi00ZDg0LWI1M2MtOWNlOTFhMjc0NjE2
 
 其他request
 _bl_uid	mFmLtr646tRhea06wi963Fw8nnqC	account.court.gov.cn	/	2026-12-31T14:41:47.156Z	35						Medium
-CNZZDATA1280020211	2074276631-1783434765-%7C1783434765	
+CNZZDATA1280020211	2074276631-1783434765-%7C1783434765
 www.court.gov.cn	/	2027-01-05T14:32:45.000Z	53						Medium
 HOLDONKEY	YWNlNzNlZTMtODc0YS00Nzc1LThjZDQtZTJlMjFkYTQxMTlj	account.court.gov.cn	/	Session	57	✓	✓	None			Medium
 ncCookie	_Uuh-6PV0WiGDfp3o-2whxESGouT7YkPpDNHbDGOKoAxdrMthWB_MgHZSFIivi_SslkhhfyXOd-pGGoriiBcrOnbbH6D0BFVejigivPzLhfKLBl--1gdiKWe5E_ooHMl	account.court.gov.cn	/	2027-07-08T09:22:30.744Z	136	✓	✓	None			Medium
-SESSION	e0d71936-ae22-48fd-9645-50d57280afbd	
-wenshu.court.gov.cn	/	Session	43	✓		
+SESSION	e0d71936-ae22-48fd-9645-50d57280afbd
+wenshu.court.gov.cn	/	Session	43	✓
 
 开着f12 response 没有内容
 关闭以后，首页账号信息出现，可能有什么拦截了
@@ -230,6 +230,6 @@ wenshu.court.gov.cn	/	Session	43	✓
 
 账号和密码
 # 真实明文账号密码
-USERNAME = "63-9568348610"
+USERNAME = "REDACTED_ACCOUNT_VALUE"
 # 真实明文密码
-PASSWORD = "Zc627788***"
+PASSWORD = "REDACTED_ACCOUNT_VALUE"

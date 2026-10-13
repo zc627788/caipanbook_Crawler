@@ -31,10 +31,10 @@ def encrypt_pwd(plain: str) -> str:
     enc = cipher.encrypt(plain.encode('utf-8'))
     return urllib.parse.quote(base64.b64encode(enc).decode('utf-8'))
 
-USERNAME_FULL = "63-9568348610"
-COUNTRY_CODE  = "+63"
-PHONE_NUMBER  = "9568348610"
-PASSWORD      = "Zc627788***"
+USERNAME_FULL = os.environ.get("WENSHU_USERNAME", "")
+COUNTRY_CODE = os.environ.get("WENSHU_COUNTRY_CODE", "")
+PHONE_NUMBER = os.environ.get("WENSHU_PHONE_NUMBER", "")
+PASSWORD = os.environ.get("WENSHU_PASSWORD", "")
 
 PROXY_SERVER = "http://127.0.0.1:10808"
 CONFIG_DIR = os.path.join(os.path.dirname(__file__), 'config')

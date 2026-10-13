@@ -1,3 +1,4 @@
+import os
 import requests
 import uuid
 import base64
@@ -16,8 +17,8 @@ def encrypt_password(password):
     encrypted_base64 = base64.b64encode(encrypted_bytes).decode('utf-8')
     return urllib.parse.quote(encrypted_base64, safe='')
 
-username = "63-9568348610"
-password = "Zc627788***"
+username = os.environ.get("WENSHU_USERNAME", "")
+password = os.environ.get("WENSHU_PASSWORD", "")
 encrypted_pwd = encrypt_password(password)
 
 url_auth = "https://wenshu.court.gov.cn/tongyiLogin/authorize"
@@ -37,7 +38,7 @@ with requests.Session() as s:
     # 1. OAuth Init
     r_init = s.post(url_auth, headers=headers_auth, proxies=proxies, timeout=10)
     oauth_url = r_init.text.strip()
-    
+
     # 2. Context App
     app_url = f"https://account.court.gov.cn/app?back_url={urllib.parse.quote(oauth_url, safe='')}"
     headers_app = {
@@ -47,13 +48,13 @@ with requests.Session() as s:
     }
     r_app = s.get(app_url, headers=headers_app, proxies=proxies, timeout=10)
     print("After App Cookies:", s.cookies.get_dict())
-    
+
     # 3. Get Captcha
     r_cap = s.get("https://account.court.gov.cn/captcha/getBase64?appDomain=wenshu.court.gov.cn", proxies=proxies, timeout=10)
     cap_json = r_cap.json()
     token = cap_json["data"]["token"]
     session_id = cap_json["data"]["sessionId"]
     print("After GetCaptcha Cookies:", s.cookies.get_dict())
-    
+
     # Save Image and solve manually in background if needed (but we want to see where ncCookie is set)
     # Since we can't solve it automatically here, we just want to look at the Set-Cookie headers in the response of each subsequent request.

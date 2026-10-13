@@ -1,3 +1,4 @@
+import os
 import requests
 import base64
 import urllib.parse
@@ -17,8 +18,8 @@ def encrypt_password(password):
     encoded_once = urllib.parse.quote(encrypted_base64, safe='')
     return encoded_once
 
-username = "63-9568348610"
-password = "Zc627788***"
+username = os.environ.get("WENSHU_USERNAME", "")
+password = os.environ.get("WENSHU_PASSWORD", "")
 encrypted_pwd = encrypt_password(password)
 
 url = "https://account.court.gov.cn/api/login"

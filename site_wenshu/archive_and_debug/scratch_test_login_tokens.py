@@ -1,3 +1,4 @@
+import os
 import requests
 import uuid
 import base64
@@ -16,8 +17,8 @@ def encrypt_password(password):
     encrypted_base64 = base64.b64encode(encrypted_bytes).decode('utf-8')
     return urllib.parse.quote(encrypted_base64)
 
-username = "63-9568348610"
-password = "Zc627788***"
+username = os.environ.get("WENSHU_USERNAME", "")
+password = os.environ.get("WENSHU_PASSWORD", "")
 encrypted_pwd = encrypt_password(password)
 
 url = "https://account.court.gov.cn/api/login"

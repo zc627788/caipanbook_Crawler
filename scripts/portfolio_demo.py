@@ -1,0 +1,45 @@
+"""Offline protocol/export checks. No logins, CAPTCHA solving or website calls."""
+from pathlib import Path
+import importlib.util, json, csv, base64, contextlib, io
+from Crypto.Cipher import DES3
+from Crypto.Util.Padding import pad, unpad
+ROOT=Path(__file__).resolve().parents[1]
+OUT=ROOT/'docs'/'portfolio'
+SAMPLE=OUT/'sample-output'
+SAMPLE.mkdir(parents=True,exist_ok=True)
+def load(name,path):
+    spec=importlib.util.spec_from_file_location(name,path)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+crypto=load('portfolio_crypto',ROOT/'site_wenshu/utils/wenshu_crypto.py')
+exporter=load('portfolio_export',ROOT/'site_wenshu/tools/export_csv.py')
+salt='abcdefghijklmnopqrstuvwx'; date='20260101'; timestamp=1767225600000
+encoded=crypto.encrypt_ciphertext(timestamp,salt,date)
+decoded=''.join(chr(int(x,2)) for x in encoded.split())
+assert decoded[:24]==salt and decoded[24:32]==date
+timestamp_plain=unpad(DES3.new(salt.encode(),DES3.MODE_CBC,date.encode()).decrypt(base64.b64decode(decoded[32:])),8).decode()
+assert timestamp_plain==str(timestamp)
+fixture={'records':[{'doc_id':'DEMO-001','title':'Synthetic contract dispute'}]}
+response=base64.b64encode(DES3.new(salt.encode(),DES3.MODE_CBC,date.encode()).encrypt(pad(json.dumps(fixture).encode(),8))).decode()
+assert json.loads(crypto.decrypt_result(response,salt,date))==fixture
+rows=[{'case_name':'Synthetic contract dispute','court_name':'Example Court A','case_code_ori':'DEMO-001','case_type':'Civil','publish_date':'2026-01-02','judge_date':'2026-01-01','litigant':'Fictional Party A / Fictional Party B','content':'Fictional text for a local export check.','doc_id':'demo-001','target_count':1},
+      {'case_name':'Synthetic service dispute','court_name':'Example Court B','case_code_ori':'DEMO-002','case_type':'Civil','publish_date':'2026-01-03','judge_date':'2026-01-02','litigant':'Fictional Party C / Fictional Party D','content':'No real legal case or personal information is used.','doc_id':'demo-002','target_count':1}]
+source=SAMPLE/'input.jsonl'; dest=SAMPLE/'documents.csv'
+source.write_text('\n'.join(json.dumps(r) for r in rows)+'\n',encoding='utf-8')
+with contextlib.redirect_stdout(io.StringIO()):exporter.jsonl_to_csv(str(source),str(dest))
+with dest.open(encoding='utf-8-sig',newline='') as f: exported=list(csv.DictReader(f))
+assert len(exported)==2 and exported[0]['doc_id']=='demo-001' and len(exported[0])==12
+checks=['Request encoding verified','Response decoding verified','12-column CSV export']
+summary={'mode':'offline synthetic fixture','checks':checks,'exported_records':2,'live_collection_tested':False}
+(OUT/'verification.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
+
+def render_report(title, subtitle, checks, rows, columns, workflow):
+    import html
+    esc=lambda v: html.escape(str(v))
+    cards=''.join('<div class="check"><span>PASS</span><strong>'+esc(x)+'</strong></div>' for x in checks)
+    header=''.join('<th>'+esc(x[1])+'</th>' for x in columns)
+    body=''.join('<tr>'+''.join('<td>'+esc(row.get(k,''))+'</td>' for k,_ in columns)+'</tr>' for row in rows)
+    return '''<!doctype html><html lang="en"><meta charset="utf-8"><title>Portfolio demonstration</title><style>
+    *{box-sizing:border-box}body{margin:0;background:#edf1f4;color:#163040;font:17px/1.5 'Segoe UI',Arial,sans-serif}.page{width:1440px;min-height:960px;padding:54px 64px;background:linear-gradient(125deg,#f7fafc,#edf3f5)}.eyebrow{font-size:15px;letter-spacing:2px;color:#177968;font-weight:700}h1{font-size:46px;line-height:1.12;max-width:1000px;margin:17px 0}p{max-width:1120px;color:#51636e}.note{padding:12px 20px;border-left:4px solid #dfab4b;background:#fff7e9;color:#775b27;font-size:16px}.checks{display:flex;gap:16px;margin:30px 0}.check{flex:1;background:white;border:1px solid #d7e3e7;border-radius:12px;padding:20px}.check span{display:block;color:#178169;font-size:13px;letter-spacing:1px}.check strong{display:block;margin-top:6px;font-size:19px}.flow{background:#143c4a;color:#d5f3ed;padding:16px 24px;border-radius:10px;margin:24px 0;font-size:19px}table{width:100%;background:white;border-collapse:collapse;font-size:15px}th{background:#e0eaeF;text-align:left;padding:15px}td{padding:15px;border-bottom:1px solid #e7edf0;max-width:440px;overflow-wrap:anywhere}h2{font-size:23px}.footer{font-size:14px;color:#6c7d87;margin-top:25px}code{font-family:Consolas,monospace}</style><main class="page"><div class="eyebrow">PYTHON AUTOMATION / REPRODUCIBLE CASE STUDY</div><h1>'''+esc(title)+'''</h1><p>'''+esc(subtitle)+'''</p><div class="note">Offline sample run with synthetic data. No live website access or client data. This is a generated execution report, not an application dashboard.</div><div class="checks">'''+cards+'''</div><div class="flow">'''+esc(workflow)+'''</div><h2>Actual output from the sample run</h2><table><thead><tr>'''+header+'''</tr></thead><tbody>'''+body+'''</tbody></table><p class="footer">Generated by <code>scripts/portfolio_demo.py</code> using existing repository modules. Live-site feasibility, access and production performance require separate validation.</p></main></html>'''
+
+(OUT/'demo.html').write_text(render_report('Complex requests. Structured results.','A protocol-analysis case study with reproducible encoding, decoding and document-export checks.',checks,exported,[('case_code_ori','Case reference'),('court_name','Court'),('case_name','Document title'),('doc_id','Traceable ID')],'Request encoding → Response decoding → Field normalization → JSONL / CSV'),encoding='utf-8')
+print(json.dumps(summary))

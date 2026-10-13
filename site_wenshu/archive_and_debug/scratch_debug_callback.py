@@ -3,6 +3,7 @@
 authorizeCallBack 到底有没有触发服务端绑定用户到 SESSION？
 通过精确复现浏览器请求链来找差异。
 """
+import os
 import requests
 import base64
 import urllib.parse
@@ -12,8 +13,8 @@ from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_v1_5
 
 # ==================== 配置 ====================
-USERNAME = "63-9568348610"
-PASSWORD = "Zc627788***"
+USERNAME = os.environ.get("WENSHU_USERNAME", "")
+PASSWORD = os.environ.get("WENSHU_PASSWORD", "")
 PUB_KEY = """-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5GVku07yXCndaMS1evPIPyWwhbdWMVRqL4qg4OsKbzyTGmV4YkG8H0hwwrFLuPhqC5tL136aaizuL/lN5DRRbePct6syILOLLCBJ5J5rQyGr00l1zQvdNKYp4tT5EFlqw8tlPkibcsd5Ecc8sTYa77HxNeIa6DRuObC5H9t85ALJyDVZC3Y4ES/u61Q7LDnB3kG9MnXJsJiQxm1pLkE7Zfxy29d5JaXbbfwhCDSjE4+dUQoq2MVIt2qVjZSo5Hd/bAFGU1Lmc7GkFeLiLjNTOfECF52ms/dks92Wx/glfRuK4h/fcxtGB4Q2VXu5k68e/2uojs6jnFsMKVe+FVUDkQIDAQAB
 -----END PUBLIC KEY-----"""
@@ -167,7 +168,7 @@ if landing_match:
     }, proxies=PROXIES, timeout=15)
     print(f"     Status: {r5e.status_code}")
     print(f"     Set-Cookie: {r5e.headers.get('Set-Cookie', '(none)')}")
-    
+
     # 5f: 最终检查
     print("\n[5f] 访问 landing 后最终检查 wenshu 登录态:")
     uid, j = check_login(session, landing_url)

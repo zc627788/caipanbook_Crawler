@@ -1,0 +1,10 @@
+{
+  "mode": "offline synthetic fixture",
+  "checks": [
+    "Request encoding verified",
+    "Response decoding verified",
+    "12-column CSV export"
+  ],
+  "exported_records": 2,
+  "live_collection_tested": false
+}

@@ -1,65 +1,70 @@
-# 中国裁判文书网 逆向爬虫工程 (caipanbook_Crawler)
+# Complex Website Data Extraction & Protocol Analysis
 
-针对裁判文书网 2025-2026 最新接口的混合协议爬虫。支持**账号密码登录**，自动绕过 WAF 的 TLS 指纹检测。
+**A Python case study in converting a complex, session-based document website into structured, resumable data collection.**
 
----
+The project targets China Judgments Online. Its engineering focus is request/response protocol analysis, session handling, hierarchical task partitioning, checkpoint recovery and consistent JSONL/CSV output.
 
-## 快速开始
+## Client problem and delivery
 
-```bash
-# 安装依赖
-pip install playwright ddddocr tls_client pycryptodome
-playwright install chromium
+| Challenge | Implementation in this repository |
+| --- | --- |
+| Browser requests contain encoded/encrypted parameters | Dedicated request encoding and response decoding functions |
+| Data is partitioned by date, province and court | Hierarchical traversal and task-level progress tracking |
+| Long tasks may stop or encounter response errors | Checkpoints, bounded retries and error-state handling |
+| Raw records use inconsistent field names | A normalized schema and CSV export utility |
+| Handover must be inspectable | Source code, operating notes and an offline demonstration |
 
-# 自动登录（Playwright 打开浏览器 + OCR 识别验证码 -> 自动重试 -> 保存 cookie）
-python site_wenshu/login_auto.py
+## Reproducible offline demonstration
 
-# 运行爬虫（自动读取 config/session.json）
-python site_wenshu/crawler_wenshu.py
+![Offline protocol and export demonstration](docs/portfolio/demo.png)
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install pycryptodome
+.\.venv\Scripts\python.exe scripts/portfolio_demo.py
 ```
 
----
+This runs the repository's crypto helpers and CSV exporter against **synthetic fixtures**. It checks request encoding, encrypted-response decoding, and tabular export without logging in or contacting the source site. Open `docs/portfolio/demo.html` for the report. These local checks do not demonstrate current website access, collection speed or production coverage.
 
-## 项目结构
+## Current implementation map
 
-```text
-site_wenshu/
-├── crawler_wenshu.py            # 核心爬虫（tls_client + 断点续爬）
-├── login_auto.py                # 全自动账号密码登录（Playwright + OCR）
-├── login_sniffer.py             # 手动登录抓包器（提取 cookie + 对比验证）
-├── login_account_pwd.py         # 纯协议登录尝试（已弃用）
-├── login_alipay_qr.py           # 支付宝扫码登录
-├── test_wenshu_api.py           # API 测试脚本
-├── jsonl_to_csv.py              # JSONL -> CSV 转换
-├── config/
-│   └── session.json             # 自动生成的登录凭据
-└── utils/
-    └── wenshu_crypto.py         # 3DES 加解密 + RSA 密码加密
+| Path | Purpose |
+| --- | --- |
+| `site_wenshu/crawler_wenshu.py` | Main crawler, field normalization, date/province/court traversal and checkpoints |
+| `site_wenshu/utils/wenshu_crypto.py` | Request encoding and response decryption |
+| `site_wenshu/utils/account_pool.py` | Session/account state management |
+| `site_wenshu/utils/wenshu_auth.py` | Authentication helper implementation |
+| `site_wenshu/tools/manual_login.py` | Legacy browser login helper; despite its filename, it contains automated login/CAPTCHA handling |
+| `site_wenshu/tools/export_csv.py` | JSONL-to-CSV conversion and reconciliation output |
+| `site_wenshu/archive_and_debug/` | Historical diagnostic scripts, not the supported entry point |
+
+The current crawler imports **curl_cffi**. Older notes discussing `tls_client` describe previous experiments and should not be treated as the current dependency or startup guide.
+
+## Preparing a live deployment
+
+Install dependencies from `site_wenshu/requirements.txt` in an isolated environment, and install the Playwright browser only if the selected workflow needs it:
+
+```powershell
+python -m pip install -r site_wenshu/requirements.txt
+python -m playwright install chromium
 ```
 
----
+Before running `python site_wenshu/crawler_wenshu.py`, review the source-specific configuration and constants: date range, output filenames, local proxy, request rates, session inputs and access requirements. This is a developer-oriented project, not a one-command hosted service. Legacy diagnostic scripts should not be run blindly.
 
-## 技术要点
+Login helpers now read local account values from `WENSHU_USERNAME`, `WENSHU_PASSWORD`, `WENSHU_PHONE_NUMBER` and, where used, `WENSHU_COUNTRY_CODE`. Do not commit real account values, cookies or session files. Some helpers require additional review before use. A client engagement must define the permitted sources, authorized account access and applicable access limits; this portfolio does not promise unrestricted access or universal CAPTCHA/WAF bypass.
 
-### TLS 指纹绕过（最关键）
+For an existing JSONL export:
 
-服务端 WAF 通过 TLS 握手 JA3 指纹识别客户端：
-- `requests` (urllib3) -> `anonymousUser` ❌
-- `curl_cffi` (chrome120) -> `anonymousUser` ❌  
-- **`tls_client` (chrome_120)** -> 真实用户 ✅
+```powershell
+python -c "from site_wenshu.tools.export_csv import jsonl_to_csv; jsonl_to_csv('input.jsonl', 'output.csv')"
+```
 
-### 账号密码登录流程
+## Deliverable schema
 
-`tongyiLogin/authorize` -> `captcha/getBase64` -> RSA 加密密码 -> `/api/login` -> OAuth 回调 -> SESSION 绑定
+The exporter produces columns such as `case_name`, `court_name`, `case_code_ori`, `case_type`, `publish_date`, `judge_date`, `content`, `target_count` and `doc_id`. Dataset contents and permitted fields should be agreed before collection; example portfolio data is fictional.
 
-### API 参数变更（2025 新版）
+## What this case study demonstrates
 
-- 不再需要 `pageId`、`cprqStart`/`cprqEnd` 参数
-- 日期条件统一放在 `queryCondition` JSON 中
-- 需同时携带 5 个 cookie：`SESSION` + `HOLDONKEY` + `ncCookie` + `wzws_reurl` + `_bl_uid`
+Protocol debugging, source-specific Python automation, task partitioning, failure recovery and structured data delivery. Current live availability and a client's exact scope require a separate feasibility check. No client identity, collection volume, uptime or success-rate claim is inferred from the presence of code.
 
-### 其他
-
-- `ciphertext`：时间戳 + Salt + 日期的 3DES CBC 加密
-- `pageSize=5` 不可改，否则日期过滤静默失效
-- 遇到 `code=9/-9` 自动退避重试
+[Historical Chinese notes](docs/legacy-readme.zh-CN.md) · [Technical investigation notes](site_wenshu/doc/wenshu_reverse_and_crawler_guide.md)
