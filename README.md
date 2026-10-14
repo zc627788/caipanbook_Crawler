@@ -14,6 +14,26 @@ The project targets China Judgments Online. Its engineering focus is request/res
 | Raw records use inconsistent field names | A normalized schema and CSV export utility |
 | Handover must be inspectable | Source code, operating notes and an offline demonstration |
 
+## Verified original project output — 14 October 2026
+
+![Original project output audit](docs/portfolio/project-evidence/audit.png)
+
+The local crawler project's `wenshu_2015mon.jsonl` contains **7,296 records with 7,296 distinct document IDs**, matching the checkpoint's `total_saved=7296`. Running the project's existing CSV exporter again produced **7,296 rows × 12 columns**, compared with 6,341 rows in the older CSV: **955 additional rows were recovered from the existing JSONL**. The local and repository exporters are identical after line-ending normalization.
+
+The regenerated export contains **1,040 distinct nonempty court-field values**, **6,854 records with body text**, and **442 without body text**. All normalized judgment dates fall in June 2015. No JSON parse failures, missing document IDs or duplicate IDs were found in this input. Type fields include unmapped source codes; they are not represented as fully normalized categories.
+
+This is a local verification of **existing crawler output**, not a claim of current live website access or official completeness. A separate file named `wenshu_2025july.csv` mixes 425 July-2025 records with 5,443 June-2015 records and is not added to the total above. The previously referenced download-folder archive is excluded from this project's evidence.
+
+Inspect the [audit facts and input hash](docs/portfolio/project-evidence/verification.json) and [20-row redacted preview](docs/portfolio/project-evidence/redacted-preview.csv). Original titles, parties, case numbers, document IDs and body text remain local. The preview is a reduced public schema, while the verified private export uses the original 12 columns.
+
+Reproduce against an authorized local checkout containing the original data:
+
+```powershell
+python scripts/audit_project_output.py "LOCAL_PROJECT" --private-out "LOCAL_PRIVATE_OUTPUT" --public-out "LOCAL_PUBLIC_EVIDENCE"
+```
+
+The script reads the checkpoint and original JSONL, runs the reviewed local exporter, reconciles IDs and counts, and emits only aggregate metrics and a redacted preview into the public output directory. Raw exports must remain private.
+
 ## Reproducible offline demonstration
 
 ![Offline protocol and export demonstration](docs/portfolio/demo.png)

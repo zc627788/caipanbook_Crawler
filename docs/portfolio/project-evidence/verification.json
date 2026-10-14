@@ -1,0 +1,63 @@
+{
+  "audit_date": "2026-10-14",
+  "source": "Original crawler project output and checkpoint; local verification, not live recollection.",
+  "input_file": "wenshu_2015mon.jsonl",
+  "input_sha256": "f0a7bfd48d0938e3bdd0a3fe08949bd961a6ba836dfc24638ae091652f47a54f",
+  "input_bytes": 10479317,
+  "parsed_records": 7296,
+  "invalid_json_lines": 0,
+  "unique_doc_ids": 7296,
+  "missing_ids": 0,
+  "duplicate_ids": 0,
+  "checkpoint_total_saved": 7296,
+  "checkpoint_completed_tasks": 20,
+  "checkpoint_updated_at": "2026-07-10T17:02:19.261464",
+  "export_rows": 7296,
+  "export_columns": 12,
+  "nonempty_content": 6854,
+  "empty_content": 442,
+  "distinct_court_values": 1040,
+  "judge_date_months": {
+    "2015-06": 7296
+  },
+  "case_types": {
+    "0302": 579,
+    "0202": 72,
+    "0201": 600,
+    "0301": 4091,
+    "1005": 37,
+    "0303": 115,
+    "民事案件": 79,
+    "0209": 2,
+    "1001": 1237,
+    "0401": 95,
+    "0309": 58,
+    "0104": 83,
+    "0902": 54,
+    "0402": 37,
+    "0330": 3,
+    "1111": 1,
+    "0403": 7,
+    "0901": 8,
+    "0408": 37,
+    "0324": 11,
+    "0203": 8,
+    "0111": 2,
+    "0411": 1,
+    "0327": 1,
+    "0223": 78
+  },
+  "previous_csv_rows": 6341,
+  "rows_added_by_regeneration": 955,
+  "july_named_csv_rows": 5868,
+  "july_named_csv_actual_months": {
+    "2025-07": 425,
+    "2015-06": 5443
+  },
+  "exporter_source_matches_repository": true,
+  "limitations": [
+    "This audit validates existing project output, not current live access or official completeness.",
+    "The July-named CSV mixes months and is not added to the JSONL total.",
+    "Personal fields and original text remain local; public previews use aliases."
+  ]
+}

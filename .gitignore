@@ -13,5 +13,7 @@ site_wenshu/config/*.png
 # Reproducible local portfolio outputs
 docs/portfolio/sample-output/
 !docs/portfolio/verification.json
+!docs/portfolio/project-evidence/verification.json
+!docs/portfolio/project-evidence/redacted-preview.csv
 .env
 .env.*
