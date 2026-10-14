@@ -13,8 +13,5 @@ site_wenshu/config/*.png
 # Reproducible local portfolio outputs
 docs/portfolio/sample-output/
 !docs/portfolio/verification.json
-!docs/portfolio/historical-evidence/verification.json
-!docs/portfolio/historical-evidence/inventory-summary.json
-!docs/portfolio/historical-evidence/deidentified-preview.csv
 .env
 .env.*
