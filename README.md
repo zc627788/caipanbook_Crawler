@@ -39,6 +39,14 @@ The 12 output fields are `case_name`, `court_name`, `reason`, `program`, `case_c
 
 Some missing fields are inferred from titles or text and need checking for uses that depend on exact legal classification. Source-reported counts alone do not establish completeness.
 
+## Progress, request limits and duplicate checks
+
+The crawler keeps the last saved page and completed task keys, skips completed tasks on later runs, and spaces requests with randomized delays. Network failures are retried up to six times per page, with waits increasing to a 60-second cap. It recognizes protection responses and saves progress when the configured daily budget is exhausted.
+
+The data check compares document IDs and flags duplicates. The 7,296-record file has no duplicate IDs. This is an output check, not a claim that the crawler has a global deduplication index: records are currently appended to JSONL, so an interrupted write or overlapping collection scope still needs reconciliation.
+
+These mechanisms help manage interrupted collection. They are not a measured guarantee of uninterrupted access to the current website.
+
 ## Try it locally
 
 This example uses **synthetic records** to exercise the crypto helpers and CSV export. It makes no website requests.
