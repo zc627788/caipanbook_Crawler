@@ -14,7 +14,36 @@ The project targets China Judgments Online. Its engineering focus is request/res
 | Raw records use inconsistent field names | A normalized schema and CSV export utility |
 | Handover must be inspectable | Source code, operating notes and an offline demonstration |
 
-## Reproducible offline demonstration
+## Historical collection audit — 14 October 2026
+
+![Historical data audit metrics](docs/portfolio/historical-evidence/audit.png)
+
+The owner identifies the local archives as their own historical collection. This run independently audited **one entire archive, `ws_2023_12.json.zip`**, rather than recollecting records from the live website:
+
+| Measured check | Result |
+| --- | ---: |
+| Parsed JSON records | 24,870 |
+| Distinct nonempty `wsKey` identifiers | 24,870 |
+| Invalid JSON / duplicate IDs / missing IDs | 0 / 0 / 0 |
+| Distinct nonempty court-field values | 805 |
+| Records with nonempty `qwContent` | 24,863 (7 empty) |
+| Original exporter output | 24,870 rows, 12 columns |
+
+The archive was read to its end, including ZIP CRC validation. The stored `s31` values all fall in December 2023. This does not prove official coverage or present-day website access. A separate directory inventory found **62 ZIP files occupying 73.22 GiB**; overlapping versions mean their sizes or old line counts must not be converted into a unique document total. The folder name is not proof of 1985–2024 coverage.
+
+![De-identified structured preview](docs/portfolio/historical-evidence/preview.png)
+
+Inspect the [20-row de-identified preview](docs/portfolio/historical-evidence/deidentified-preview.csv), [audit metrics and archive hash](docs/portfolio/historical-evidence/verification.json), and [inventory scope](docs/portfolio/historical-evidence/inventory-summary.json). The public preview replaces court names with aliases and withholds titles, parties, case numbers, source identifiers and full text. CSV `judge_date` contains the source `s31` month for this audit adapter, not the original full date. The existing exporter ran on the de-identified records; output reconciliation is local row-count validation, not an official collection-completeness claim.
+
+To audit an authorized local archive without publishing its raw contents:
+
+```powershell
+python scripts/audit_local_archive.py "PATH_TO_ARCHIVE.zip" --out "LOCAL_AUDIT_OUTPUT"
+```
+
+No source archive, original judgments, personal identifiers or authentication/session material is included in the evidence bundle.
+
+## Reproducible synthetic demonstration
 
 ![Offline protocol and export demonstration](docs/portfolio/demo.png)
 

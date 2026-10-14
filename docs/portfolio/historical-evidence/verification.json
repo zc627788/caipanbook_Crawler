@@ -1,0 +1,42 @@
+{
+  "audit_date": "2026-10-14",
+  "provenance": "Historical collection attributed to the owner by owner confirmation; locally audited, not recollected live in this run.",
+  "archive_name": "ws_2023_12.json.zip",
+  "archive_sha256": "69c6f57b2d6eca5ed862aee0526c43efb17aff4265a01ab7aef1464d06448299",
+  "archive_bytes": 34163483,
+  "member_declared_bytes": 250639090,
+  "zip_members": 1,
+  "parsed_records": 24870,
+  "invalid_json_lines": 0,
+  "blank_lines": 0,
+  "unique_wsKey": 24870,
+  "duplicate_wsKey_records": 0,
+  "missing_wsKey_records": 0,
+  "nonempty_qwContent_records": 24863,
+  "distinct_nonempty_court_values": 805,
+  "content_chars_total": 105123678,
+  "content_chars_median": 3134,
+  "case_type_counts": {
+    "执行案件": 17438,
+    "民事案件": 6142,
+    "非诉保全审查案件": 304,
+    "强制清算与破产案件": 28,
+    "其他案件": 30,
+    "刑事案件": 695,
+    "行政案件": 169,
+    "其他/未映射": 64
+  },
+  "s31_month_counts": {
+    "2023-12": 24870
+  },
+  "exported_rows": 24870,
+  "export_columns": 12,
+  "public_preview_rows": 20,
+  "elapsed_seconds": 2.61,
+  "limitations": [
+    "One complete archive read and ZIP CRC checked, not all archives.",
+    "Content length is the stored qwContent string length; it may include markup.",
+    "No claim of official coverage or present-day source access.",
+    "Public preview uses aliases and withheld fields; original text, parties, case numbers and document IDs are not shared."
+  ]
+}
