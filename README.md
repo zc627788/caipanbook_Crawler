@@ -1,42 +1,47 @@
-# Complex Website Data Extraction & Protocol Analysis
+# China Judgments Online: collection and CSV export
 
-**A Python case study in converting a complex, session-based document website into structured, resumable data collection.**
+[中文说明](README.zh-CN.md)
 
-The project targets China Judgments Online. Its engineering focus is request/response protocol analysis, session handling, hierarchical task partitioning, checkpoint recovery and consistent JSONL/CSV output.
+I built this Python project to collect court documents and turn the responses into a usable table. Most of the work sits behind the download: understanding the site's request format, splitting searches into smaller tasks, keeping track of progress, and exporting records consistently.
 
-## Client problem and delivery
+The repository includes the crawler, protocol helpers, checkpoints and a CSV exporter.
 
-| Challenge | Implementation in this repository |
+## What the saved data looks like
+
+![Local verification of original crawler output](docs/portfolio/project-evidence/audit.png)
+
+On 14 October 2026, I checked the original `wenshu_2015mon.jsonl` and reran the project's CSV exporter.
+
+| Check | Result |
 | --- | --- |
-| Browser requests contain encoded/encrypted parameters | Dedicated request encoding and response decoding functions |
-| Data is partitioned by date, province and court | Hierarchical traversal and task-level progress tracking |
-| Long tasks may stop or encounter response errors | Checkpoints, bounded retries and error-state handling |
-| Raw records use inconsistent field names | A normalized schema and CSV export utility |
-| Handover must be inspectable | Source code, operating notes and an offline demonstration |
+| Saved records / distinct document IDs | 7,296 / 7,296 |
+| Records reported by the checkpoint | 7,296 |
+| Regenerated CSV | 7,296 rows, 12 columns |
+| Previous CSV | 6,341 rows |
+| Additional records included in the regenerated CSV | 955 |
+| Records with / without body text | 6,854 / 442 |
+| Judgment month in this file | June 2015 |
 
-## Verified original project output — 14 October 2026
+The useful finding was that the JSONL held more records than the older CSV. Re-exporting brought those 955 records into the table, without collecting them again.
 
-![Original project output audit](docs/portfolio/project-evidence/audit.png)
+The screenshot is a report generated from those saved records. It is **not a new live collection or evidence of complete coverage**. Some source type codes still need mapping, and 442 records have no body text.
 
-The local crawler project's `wenshu_2015mon.jsonl` contains **7,296 records with 7,296 distinct document IDs**, matching the checkpoint's `total_saved=7296`. Running the project's existing CSV exporter again produced **7,296 rows × 12 columns**, compared with 6,341 rows in the older CSV: **955 additional rows were recovered from the existing JSONL**. The local and repository exporters are identical after line-ending normalization.
+See the [verification numbers and input hash](docs/portfolio/project-evidence/verification.json) and [20-row redacted sample](docs/portfolio/project-evidence/redacted-preview.csv). The public sample uses aliases and omits original names, case numbers, IDs and document text, so it has fewer fields than the private export.
 
-The regenerated export contains **1,040 distinct nonempty court-field values**, **6,854 records with body text**, and **442 without body text**. All normalized judgment dates fall in June 2015. No JSON parse failures, missing document IDs or duplicate IDs were found in this input. Type fields include unmapped source codes; they are not represented as fully normalized categories.
+## How the collection works
 
-This is a local verification of **existing crawler output**, not a claim of current live website access or official completeness. A separate file named `wenshu_2025july.csv` mixes 425 July-2025 records with 5,443 June-2015 records and is not added to the total above. The previously referenced download-folder archive is excluded from this project's evidence.
+1. Protocol helpers encode request parameters and decode responses.
+2. The crawler splits work by date, province and court.
+3. Records go into JSONL; checkpoints keep the task progress for later runs.
+4. The exporter produces CSV and prints court-level counts for inspection.
 
-Inspect the [audit facts and input hash](docs/portfolio/project-evidence/verification.json) and [20-row redacted preview](docs/portfolio/project-evidence/redacted-preview.csv). Original titles, parties, case numbers, document IDs and body text remain local. The preview is a reduced public schema, while the verified private export uses the original 12 columns.
+The 12 output fields are `case_name`, `court_name`, `reason`, `program`, `case_code_ori`, `case_type`, `publish_date`, `judge_date`, `litigant`, `content`, `target_count` and `doc_id`.
 
-Reproduce against an authorized local checkout containing the original data:
+Some missing fields are inferred from titles or text and need checking for uses that depend on exact legal classification. Source-reported counts alone do not establish completeness.
 
-```powershell
-python scripts/audit_project_output.py "LOCAL_PROJECT" --private-out "LOCAL_PRIVATE_OUTPUT" --public-out "LOCAL_PUBLIC_EVIDENCE"
-```
+## Try it locally
 
-The script reads the checkpoint and original JSONL, runs the reviewed local exporter, reconciles IDs and counts, and emits only aggregate metrics and a redacted preview into the public output directory. Raw exports must remain private.
-
-## Reproducible offline demonstration
-
-![Offline protocol and export demonstration](docs/portfolio/demo.png)
+This example uses **synthetic records** to exercise the crypto helpers and CSV export. It makes no website requests.
 
 ```powershell
 python -m venv .venv
@@ -44,47 +49,45 @@ python -m venv .venv
 .\.venv\Scripts\python.exe scripts/portfolio_demo.py
 ```
 
-This runs the repository's crypto helpers and CSV exporter against **synthetic fixtures**. It checks request encoding, encrypted-response decoding, and tabular export without logging in or contacting the source site. Open `docs/portfolio/demo.html` for the report. These local checks do not demonstrate current website access, collection speed or production coverage.
-
-## Current implementation map
-
-| Path | Purpose |
-| --- | --- |
-| `site_wenshu/crawler_wenshu.py` | Main crawler, field normalization, date/province/court traversal and checkpoints |
-| `site_wenshu/utils/wenshu_crypto.py` | Request encoding and response decryption |
-| `site_wenshu/utils/account_pool.py` | Session/account state management |
-| `site_wenshu/utils/wenshu_auth.py` | Authentication helper implementation |
-| `site_wenshu/tools/manual_login.py` | Legacy browser login helper; despite its filename, it contains automated login/CAPTCHA handling |
-| `site_wenshu/tools/export_csv.py` | JSONL-to-CSV conversion and reconciliation output |
-| `site_wenshu/archive_and_debug/` | Historical diagnostic scripts, not the supported entry point |
-
-The current crawler imports **curl_cffi**. Older notes discussing `tls_client` describe previous experiments and should not be treated as the current dependency or startup guide.
-
-## Preparing a live deployment
-
-Install dependencies from `site_wenshu/requirements.txt` in an isolated environment, and install the Playwright browser only if the selected workflow needs it:
-
-```powershell
-python -m pip install -r site_wenshu/requirements.txt
-python -m playwright install chromium
-```
-
-Before running `python site_wenshu/crawler_wenshu.py`, review the source-specific configuration and constants: date range, output filenames, local proxy, request rates, session inputs and access requirements. This is a developer-oriented project, not a one-command hosted service. Legacy diagnostic scripts should not be run blindly.
-
-Login helpers now read local account values from `WENSHU_USERNAME`, `WENSHU_PASSWORD`, `WENSHU_PHONE_NUMBER` and, where used, `WENSHU_COUNTRY_CODE`. Do not commit real account values, cookies or session files. Some helpers require additional review before use. A client engagement must define the permitted sources, authorized account access and applicable access limits; this portfolio does not promise unrestricted access or universal CAPTCHA/WAF bypass.
-
-For an existing JSONL export:
+Open `docs/portfolio/demo.html` for the result. To export an existing JSONL:
 
 ```powershell
 python -c "from site_wenshu.tools.export_csv import jsonl_to_csv; jsonl_to_csv('input.jsonl', 'output.csv')"
 ```
 
-## Deliverable schema
+To repeat the data check against a local checkout containing the original data:
 
-The exporter produces columns such as `case_name`, `court_name`, `case_code_ori`, `case_type`, `publish_date`, `judge_date`, `content`, `target_count` and `doc_id`. Dataset contents and permitted fields should be agreed before collection; example portfolio data is fictional.
+```powershell
+python scripts/audit_project_output.py "LOCAL_PROJECT" --private-out "LOCAL_PRIVATE_OUTPUT" --public-out "LOCAL_PUBLIC_EVIDENCE"
+```
 
-## What this case study demonstrates
+The full export stays in the private output directory. The public output contains aggregate counts and redacted rows.
 
-Protocol debugging, source-specific Python automation, task partitioning, failure recovery and structured data delivery. Current live availability and a client's exact scope require a separate feasibility check. No client identity, collection volume, uptime or success-rate claim is inferred from the presence of code.
+## Running the crawler
 
-[Historical Chinese notes](docs/legacy-readme.zh-CN.md) · [Technical investigation notes](site_wenshu/doc/wenshu_reverse_and_crawler_guide.md)
+```powershell
+python -m pip install -r site_wenshu/requirements.txt
+# Only needed for browser-based workflows:
+python -m playwright install chromium
+```
+
+Before starting `python site_wenshu/crawler_wenshu.py`, review the date range, output paths, proxy, request rates and session configuration. The current crawler uses `curl_cffi`; older `tls_client` notes describe earlier experiments.
+
+Login helpers read `WENSHU_USERNAME`, `WENSHU_PASSWORD`, `WENSHU_PHONE_NUMBER` and, where used, `WENSHU_COUNTRY_CODE`. Keep account values and session files out of Git. These source-specific helpers need review before use; this is not a maintained one-click service. Current live website access was not retested in the data check above.
+
+## Code map
+
+| File | Responsibility |
+| --- | --- |
+| `site_wenshu/crawler_wenshu.py` | Task traversal, records and checkpoints |
+| `site_wenshu/utils/wenshu_crypto.py` | Request encoding and response decoding |
+| `site_wenshu/utils/account_pool.py` | Account/session state |
+| `site_wenshu/utils/wenshu_auth.py` | Authentication helpers |
+| `site_wenshu/tools/export_csv.py` | Field extraction and CSV export |
+| `scripts/audit_project_output.py` | Local data checks and redacted evidence |
+
+`site_wenshu/tools/manual_login.py` is a legacy helper with automated handling despite its name. `archive_and_debug/` contains investigation scripts rather than the normal entry point.
+
+For similar work, I would start with the source URL, a field list and a small sample. That gives us something concrete to agree on before estimating a larger run or scheduled updates.
+
+[Original Chinese notes](docs/legacy-readme.zh-CN.md) · [Protocol investigation notes](site_wenshu/doc/wenshu_reverse_and_crawler_guide.md)
